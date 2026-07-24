@@ -1185,27 +1185,18 @@ function onPlayerError(e) {
 // consumed exactly once, the first time PLAYING is reported for that load.
 let pendingAutoplayCorrection = false;
 
-// mute-before-load experiment, take two. The original version of this
-// (mute:1 + unMute() consumed only on the first real PLAYING event) was
-// removed after real-device data showed PLAYING sometimes never fires at
-// all, leaving the track permanently muted — a confirmed, real bug. Re-
-// added here, deliberately harder to get stuck this time, specifically to
-// test a different theory: an ad system won't serve an ad if the request
-// signals a muted player (a muted impression is worth nothing to an
-// advertiser), which — if true — would make loading muted plausibly
-// suppress ads on real, if inconsistent, YouTube ad-serving. The event-
-// based unmute below stays as the fast path, but pendingUnmuteTimer (set
-// in startPlaybackFor) now ALSO force-unmutes unconditionally after 3s
-// regardless of whether PLAYING ever fired — this is a plain, idempotent
-// unMute()/setVolume() call, not a playVideo()/loadVideoById() retry, so
-// it carries none of the reinitialize-and-restart risk documented
-// elsewhere in this file for repeated write-commands based on inferred
-// state; worst case if this theory is wrong, the real track is muted for
-// its first ~3 seconds instead of forever.
+// mute-before-load experiment, take three: the 3s guaranteed-unmute fallback
+// (take two) made no observed difference to ad frequency, so at the user's
+// explicit request this now matches the original, pre-twenty-ninth-pass
+// mechanism exactly again — mute:1 + unMute() consumed ONLY on the first
+// real PLAYING event, no time-based fallback. **Known, confirmed real risk,
+// accepted deliberately for this test**: real-device data already showed
+// PLAYING can simply never fire, leaving a track permanently muted with no
+// recovery. If this experiment doesn't move the needle on ads either, revert
+// to no-mute (the twenty-ninth pass's fix, confirmed working) rather than
+// trying further variations of this same mechanism.
 let pendingUnmute = false;
-let pendingUnmuteTimer = null;
 function forceUnmuteNow() {
-  if (pendingUnmuteTimer) { clearTimeout(pendingUnmuteTimer); pendingUnmuteTimer = null; }
   if (!pendingUnmute) return;
   pendingUnmute = false;
   try { player.ytPlayer.unMute(); player.ytPlayer.setVolume(100); debugLogEvent('UNMUTE'); } catch (e2) { /* not worth surfacing — playback itself still proceeds */ }
@@ -1286,8 +1277,6 @@ function startPlaybackFor(track) {
   try {
     pendingAutoplayCorrection = !player.isPlaying;
     pendingUnmute = true;
-    if (pendingUnmuteTimer) clearTimeout(pendingUnmuteTimer);
-    pendingUnmuteTimer = setTimeout(forceUnmuteNow, 3000);
     player.ytPlayer.mute();
     player.ytPlayer.loadVideoById(track.id);
   } catch (e) {
