@@ -1149,7 +1149,12 @@ function onYouTubeIframeAPIReady() {
     // a real, concrete gap: some embedding contexts can silently reject
     // player commands without it, which fits "plays fine on desktop,
     // silently does nothing on a real device" exactly.
-    playerVars: { playsinline: 1, controls: 0, disablekb: 1, fs: 0, modestbranding: 1, rel: 0, origin: location.origin },
+    // mute:1 — experiment (see startPlaybackFor/onPlayerStateChange): loading
+    // muted might make YouTube's ad system skip serving an ad, since a muted
+    // impression has no value to an advertiser. Unproven, being tested with
+    // a time-based unmute fallback so a real track can never get stuck
+    // permanently silent even if that theory is wrong.
+    playerVars: { playsinline: 1, controls: 0, disablekb: 1, fs: 0, modestbranding: 1, rel: 0, origin: location.origin, mute: 1 },
     events: {
       onReady: () => { player.ytReady = true; },
       onStateChange: onPlayerStateChange,
@@ -1180,20 +1185,31 @@ function onPlayerError(e) {
 // consumed exactly once, the first time PLAYING is reported for that load.
 let pendingAutoplayCorrection = false;
 
-// Removed the mute()-before-load / unMute()-on-PLAYING trick that lived
-// here for several sessions (mute:1 in playerVars, mute() before every
-// loadVideoById(), unMute()+setVolume(100) consumed once on the first
-// real PLAYING event). It was always speculative — added on a plausible
-// theory, never actually confirmed to fix anything, removed once, re-added
-// on a since-corrected false premise — and the ?debug=1 overlay's first
-// real on-device capture (twenty-eighth pass) directly incriminated it:
-// muted stayed true for 15+ seconds straight and no PLAYING event was ever
-// logged at all, even though getCurrentTime() was genuinely advancing —
-// meaning the unmute could never fire, and the permanently-muted, silently
-// resetting-every-~8s video is exactly what was captured. Tapping "Play"
-// is already a direct user gesture, which unmuted autoplay is allowed to
-// ride on in every major browser, so the mute trick was never actually
-// necessary for this synchronous tap path in the first place.
+// mute-before-load experiment, take two. The original version of this
+// (mute:1 + unMute() consumed only on the first real PLAYING event) was
+// removed after real-device data showed PLAYING sometimes never fires at
+// all, leaving the track permanently muted — a confirmed, real bug. Re-
+// added here, deliberately harder to get stuck this time, specifically to
+// test a different theory: an ad system won't serve an ad if the request
+// signals a muted player (a muted impression is worth nothing to an
+// advertiser), which — if true — would make loading muted plausibly
+// suppress ads on real, if inconsistent, YouTube ad-serving. The event-
+// based unmute below stays as the fast path, but pendingUnmuteTimer (set
+// in startPlaybackFor) now ALSO force-unmutes unconditionally after 3s
+// regardless of whether PLAYING ever fired — this is a plain, idempotent
+// unMute()/setVolume() call, not a playVideo()/loadVideoById() retry, so
+// it carries none of the reinitialize-and-restart risk documented
+// elsewhere in this file for repeated write-commands based on inferred
+// state; worst case if this theory is wrong, the real track is muted for
+// its first ~3 seconds instead of forever.
+let pendingUnmute = false;
+let pendingUnmuteTimer = null;
+function forceUnmuteNow() {
+  if (pendingUnmuteTimer) { clearTimeout(pendingUnmuteTimer); pendingUnmuteTimer = null; }
+  if (!pendingUnmute) return;
+  pendingUnmute = false;
+  try { player.ytPlayer.unMute(); player.ytPlayer.setVolume(100); debugLogEvent('UNMUTE'); } catch (e2) { /* not worth surfacing — playback itself still proceeds */ }
+}
 function onPlayerStateChange(e) {
   debugLogEvent('STATE ' + (YT_STATE_NAMES[e.data] || e.data));
   if (e.data === YT.PlayerState.ENDED) { onTrackEnded(); return; }
@@ -1210,6 +1226,7 @@ function onPlayerStateChange(e) {
       try { player.ytPlayer.pauseVideo(); } catch (e2) { /* nothing more we can do here */ }
       return; // the pauseVideo() call above will emit its own PAUSED event
     }
+    if (pendingUnmute) forceUnmuteNow();
     if (!player.isPlaying) { player.isPlaying = true; updatePlayerUI(); }
   }
   if (e.data === YT.PlayerState.PAUSED) {
@@ -1268,6 +1285,10 @@ function startPlaybackFor(track) {
   if (DEBUG_MODE) { debugStartTime = performance.now(); debugLogEvent('LOAD ' + track.id + ' ' + track.title); }
   try {
     pendingAutoplayCorrection = !player.isPlaying;
+    pendingUnmute = true;
+    if (pendingUnmuteTimer) clearTimeout(pendingUnmuteTimer);
+    pendingUnmuteTimer = setTimeout(forceUnmuteNow, 3000);
+    player.ytPlayer.mute();
     player.ytPlayer.loadVideoById(track.id);
   } catch (e) {
     showToast('Errore durante l\'avvio della riproduzione');
