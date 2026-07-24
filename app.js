@@ -89,6 +89,43 @@ const player = {
   duration: 0,
 };
 
+/* =========================================================
+   Debug overlay — opt-in via ?debug=1 in the URL, read-only.
+   Only reads player state and writes to its own on-screen div; never
+   sends any command to the YouTube player, so it carries none of the
+   "auto-command based on inferred state" risk documented elsewhere in
+   this file. Exists to turn vague real-device symptoms ("it stops
+   around 6 seconds") into exact, reportable data (state transitions,
+   timestamps, duration, mute/volume) without needing a Mac + Safari's
+   remote Web Inspector.
+   ========================================================= */
+const DEBUG_MODE = location.search.indexOf('debug=1') !== -1;
+const debugLog = [];
+let debugStartTime = 0;
+const YT_STATE_NAMES = { '-1': 'UNSTARTED', 0: 'ENDED', 1: 'PLAYING', 2: 'PAUSED', 3: 'BUFFERING', 5: 'CUED' };
+function debugLogEvent(label) {
+  if (!DEBUG_MODE) return;
+  let t = 0, d = 0, muted = null, vol = null;
+  try { t = player.ytPlayer.getCurrentTime(); } catch (e) { /* player not ready */ }
+  try { d = player.ytPlayer.getDuration(); } catch (e) { /* player not ready */ }
+  try { muted = player.ytPlayer.isMuted(); } catch (e) { /* player not ready */ }
+  try { vol = player.ytPlayer.getVolume(); } catch (e) { /* player not ready */ }
+  const elapsed = ((performance.now() - debugStartTime) / 1000).toFixed(1);
+  debugLog.push(`+${elapsed}s ${label} t=${t.toFixed(1)} d=${d.toFixed(1)} muted=${muted} vol=${vol}`);
+  if (debugLog.length > 30) debugLog.shift();
+  const el = document.getElementById('debugOverlay');
+  if (el) el.textContent = debugLog.join('\n');
+}
+function setupDebugOverlay() {
+  if (!DEBUG_MODE) return;
+  debugStartTime = performance.now();
+  const el = document.createElement('div');
+  el.id = 'debugOverlay';
+  el.style.cssText = 'position:fixed;top:0;left:0;right:0;max-height:45vh;overflow-y:auto;background:rgba(0,0,0,.88);color:#0f0;font:10px/1.4 monospace;padding:6px 8px;z-index:99999;white-space:pre-wrap;pointer-events:none;';
+  document.body.appendChild(el);
+  debugLogEvent('OVERLAY-READY');
+}
+
 function currentTrack() {
   return player.currentIndex >= 0 ? player.queue[player.currentIndex] : null;
 }
@@ -1126,7 +1163,8 @@ function onYouTubeIframeAPIReady() {
 }
 window.onYouTubeIframeAPIReady = onYouTubeIframeAPIReady;
 
-function onPlayerError() {
+function onPlayerError(e) {
+  debugLogEvent('ERROR code=' + (e && e.data));
   showToast('Brano non disponibile, passo al successivo');
   const next = getNextIndex();
   if (next !== null) playIndex(next);
@@ -1171,6 +1209,7 @@ let pendingAutoplayCorrection = false;
 let pendingUnmute = false;
 
 function onPlayerStateChange(e) {
+  debugLogEvent('STATE ' + (YT_STATE_NAMES[e.data] || e.data));
   if (e.data === YT.PlayerState.ENDED) { onTrackEnded(); return; }
   // The real YouTube player state is the source of truth for isPlaying —
   // togglePlayPause() only flips it optimistically for instant tap feedback,
@@ -1244,6 +1283,7 @@ let pendingLoadPollId = null;
 // nothing at all — now guarded, and the caller order was fixed too (see
 // playIndex()).
 function startPlaybackFor(track) {
+  if (DEBUG_MODE) { debugStartTime = performance.now(); debugLogEvent('LOAD ' + track.id + ' ' + track.title); }
   try {
     pendingAutoplayCorrection = !player.isPlaying;
     pendingUnmute = true;
@@ -1593,6 +1633,9 @@ function setupPlaybackTicker() {
     // run past it by the next 500ms tick — a continuous, visible sawtooth.
     if (tickCount % 10 === 0) setPositionState();
     if (seekBarTickFn) seekBarTickFn();
+    // periodic sample even without a discrete state-change event, so a
+    // stuck/looping state that never fires onStateChange still shows up
+    if (DEBUG_MODE && tickCount % 2 === 0) debugLogEvent('tick');
   }, 500);
 }
 
@@ -1866,6 +1909,7 @@ function fixStandaloneViewport() {
 }
 
 function boot() {
+  setupDebugOverlay();
   fixStandaloneViewport();
   updateGreeting();
   setupNav();
