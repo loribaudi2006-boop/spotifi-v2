@@ -1149,12 +1149,7 @@ function onYouTubeIframeAPIReady() {
     // a real, concrete gap: some embedding contexts can silently reject
     // player commands without it, which fits "plays fine on desktop,
     // silently does nothing on a real device" exactly.
-    // mute:1 — experiment (see startPlaybackFor/onPlayerStateChange): loading
-    // muted might make YouTube's ad system skip serving an ad, since a muted
-    // impression has no value to an advertiser. Unproven, being tested with
-    // a time-based unmute fallback so a real track can never get stuck
-    // permanently silent even if that theory is wrong.
-    playerVars: { playsinline: 1, controls: 0, disablekb: 1, fs: 0, modestbranding: 1, rel: 0, origin: location.origin, mute: 1 },
+    playerVars: { playsinline: 1, controls: 0, disablekb: 1, fs: 0, modestbranding: 1, rel: 0, origin: location.origin },
     events: {
       onReady: () => { player.ytReady = true; },
       onStateChange: onPlayerStateChange,
@@ -1185,22 +1180,14 @@ function onPlayerError(e) {
 // consumed exactly once, the first time PLAYING is reported for that load.
 let pendingAutoplayCorrection = false;
 
-// mute-before-load experiment, take three: the 3s guaranteed-unmute fallback
-// (take two) made no observed difference to ad frequency, so at the user's
-// explicit request this now matches the original, pre-twenty-ninth-pass
-// mechanism exactly again — mute:1 + unMute() consumed ONLY on the first
-// real PLAYING event, no time-based fallback. **Known, confirmed real risk,
-// accepted deliberately for this test**: real-device data already showed
-// PLAYING can simply never fire, leaving a track permanently muted with no
-// recovery. If this experiment doesn't move the needle on ads either, revert
-// to no-mute (the twenty-ninth pass's fix, confirmed working) rather than
-// trying further variations of this same mechanism.
-let pendingUnmute = false;
-function forceUnmuteNow() {
-  if (!pendingUnmute) return;
-  pendingUnmute = false;
-  try { player.ytPlayer.unMute(); player.ytPlayer.setVolume(100); debugLogEvent('UNMUTE'); } catch (e2) { /* not worth surfacing — playback itself still proceeds */ }
-}
+// Mute-before-load was tried three ways this session (event-only, event +
+// 3s forced-unmute fallback, event-only again to match the original exactly)
+// specifically to test whether an ad system skips serving an ad to a player
+// that signals muted at request time. None of the three variants changed
+// observed ad frequency at all — the theory is not supported by real-device
+// testing, so this stays removed. Tapping "Play" is already a direct user
+// gesture, which unmuted autoplay is allowed to ride on in every major
+// browser, so no mute trick is needed for this synchronous tap path anyway.
 function onPlayerStateChange(e) {
   debugLogEvent('STATE ' + (YT_STATE_NAMES[e.data] || e.data));
   if (e.data === YT.PlayerState.ENDED) { onTrackEnded(); return; }
@@ -1217,7 +1204,6 @@ function onPlayerStateChange(e) {
       try { player.ytPlayer.pauseVideo(); } catch (e2) { /* nothing more we can do here */ }
       return; // the pauseVideo() call above will emit its own PAUSED event
     }
-    if (pendingUnmute) forceUnmuteNow();
     if (!player.isPlaying) { player.isPlaying = true; updatePlayerUI(); }
   }
   if (e.data === YT.PlayerState.PAUSED) {
@@ -1276,8 +1262,6 @@ function startPlaybackFor(track) {
   if (DEBUG_MODE) { debugStartTime = performance.now(); debugLogEvent('LOAD ' + track.id + ' ' + track.title); }
   try {
     pendingAutoplayCorrection = !player.isPlaying;
-    pendingUnmute = true;
-    player.ytPlayer.mute();
     player.ytPlayer.loadVideoById(track.id);
   } catch (e) {
     showToast('Errore durante l\'avvio della riproduzione');
