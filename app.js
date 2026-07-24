@@ -1459,7 +1459,9 @@ function setPositionState(forcedPosition) {
       // what made the scrubber keep creeping forward after real playback
       // had already stopped (see the callers below for why this alone
       // isn't enough — call frequency was the other half of the bug).
-      navigator.mediaSession.setPositionState({ duration, playbackRate: player.isPlaying ? 1 : 0, position });
+      const rate = player.isPlaying ? 1 : 0;
+      debugLogEvent(`POS pos=${position.toFixed(1)} dur=${duration.toFixed(1)} rate=${rate}`);
+      navigator.mediaSession.setPositionState({ duration, playbackRate: rate, position });
     }
   } catch (e) { /* player not ready for this call yet */ }
 }
