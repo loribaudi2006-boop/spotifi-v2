@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+<meta name="theme-color" content="#121212" />
+<meta name="color-scheme" content="dark" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Spotifi" />
+<title>Spotifi</title>
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<link rel="icon" href="icons/icon.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div id="app">
+
+  <div id="ambientBg" aria-hidden="true"></div>
+
+  <!-- ================= FIXED TOP BAR (always visible, all routes) ================= -->
+  <header id="topBar" class="top-bar">
+    <div class="bar-cover-tint" id="topBarTint" aria-hidden="true"></div>
+    <button type="button" class="account-btn" id="accountBtn" aria-label="Account"><span class="ic"></span></button>
+    <div class="tb-actions">
+      <button type="button" class="icon-btn" id="notifBtn" aria-label="Notifiche"><span class="ic"></span></button>
+      <button type="button" class="icon-btn" id="settingsBtn" aria-label="Impostazioni"><span class="ic"></span></button>
+    </div>
+  </header>
+
+  <!-- ================= HEADER (home route only) ================= -->
+  <header id="homeHeader" class="home-header">
+    <div class="hh-greeting" id="greetingText">Buongiorno</div>
+  </header>
+
+  <!-- ================= SEARCH BAR (search route only) ================= -->
+  <header id="searchHeader" class="search-header hidden">
+    <div class="search-bar">
+      <span class="ic search-ic"></span>
+      <input type="text" id="searchInput" placeholder="Cosa vuoi ascoltare?" autocomplete="off" />
+      <button type="button" class="icon-btn mic-btn" id="voiceSearchBtn" aria-label="Ricerca vocale"><span class="ic"></span></button>
+    </div>
+    <div class="voice-wave hidden" id="voiceWave">
+      <span></span><span></span><span></span><span></span><span></span>
+    </div>
+    <div class="search-history-dropdown hidden" id="searchHistoryDropdown">
+      <div class="shd-head">
+        <span>Cronologia</span>
+        <button type="button" class="shd-clear" id="shdClearBtn">Cancella tutto</button>
+      </div>
+      <div class="shd-list" id="shdList"></div>
+    </div>
+  </header>
+
+  <!-- ================= LIBRARY HEADER (library route only) ================= -->
+  <header id="libraryHeader" class="library-header hidden">
+    <div class="lh-top">
+      <div class="lh-title">La tua libreria</div>
+      <div class="lh-actions">
+        <button type="button" class="icon-btn" id="libraryLayoutBtn" aria-label="Cambia visualizzazione"><span class="ic"></span></button>
+        <button type="button" class="icon-btn" id="libraryAddBtn" aria-label="Crea playlist"><span class="ic"></span></button>
+      </div>
+    </div>
+    <div class="chip-row" id="libraryChips">
+      <button type="button" class="chip active" data-filter="all">Tutti</button>
+      <button type="button" class="chip" data-filter="playlists">Playlist</button>
+      <button type="button" class="chip" data-filter="artists">Artisti</button>
+    </div>
+  </header>
+
+  <!-- ================= MAIN VIEWS ================= -->
+  <main id="views">
+    <section id="view-home" class="view"></section>
+    <section id="view-search" class="view hidden"></section>
+    <section id="view-library" class="view hidden"></section>
+  </main>
+
+  <!-- ================= MINI PLAYER ================= -->
+  <div id="miniPlayer" class="mini-player hidden">
+    <div class="mp-progress"><div class="mp-progress-fill" id="miniProgressFill"></div></div>
+    <div class="mp-body">
+      <div class="mp-cover" id="miniCover"></div>
+      <div class="mp-meta">
+        <div class="mp-title" id="miniTitle">Nessun brano selezionato</div>
+        <div class="mp-artist" id="miniArtist">-</div>
+      </div>
+      <button type="button" class="icon-btn mp-like-btn" id="miniLikeBtn" aria-label="Aggiungi ai preferiti"><span class="ic"></span></button>
+      <button type="button" class="icon-btn mp-play-btn" id="miniPlayBtn" aria-label="Play"><span class="ic"></span></button>
+    </div>
+  </div>
+
+  <!-- ================= BOTTOM NAV ================= -->
+  <nav id="bottomNav" class="bottom-nav">
+    <div class="bar-cover-tint" id="bottomNavTint" aria-hidden="true"></div>
+    <div class="bottom-nav-row">
+      <button type="button" class="nav-item active" data-route="home"><span class="nav-icon"></span><span class="nav-label">Home</span></button>
+      <button type="button" class="nav-item" data-route="search"><span class="nav-icon"></span><span class="nav-label">Cerca</span></button>
+      <button type="button" class="nav-item" data-route="library"><span class="nav-icon"></span><span class="nav-label">La tua libreria</span></button>
+    </div>
+    <div class="bottom-nav-safe-spacer" aria-hidden="true"></div>
+  </nav>
+
+  <!-- ================= FULL SCREEN PLAYER ================= -->
+  <div id="fullPlayer" class="full-player hidden">
+    <div class="fp-bg" id="fpBg" aria-hidden="true"></div>
+    <div class="fp-drag-handle" id="fpDragHandle">
+      <div class="fp-handle-bar"></div>
+      <button type="button" class="icon-btn fp-close" id="fpCloseBtn" aria-label="Chiudi"><span class="ic"></span></button>
+      <div class="fp-context">In riproduzione</div>
+      <button type="button" class="icon-btn fp-queue-toggle" id="fpQueueBtn" aria-label="Coda"><span class="ic"></span></button>
+    </div>
+
+    <div class="fp-cover-wrap" id="fpCoverWrap">
+      <div class="fp-cover" id="fpCover"></div>
+    </div>
+
+    <div class="fp-info">
+      <div class="fp-titles">
+        <div class="fp-title" id="fpTitle">Titolo brano</div>
+        <div class="fp-artist" id="fpArtist">Artista</div>
+      </div>
+      <button type="button" class="icon-btn fp-like-btn" id="fpLikeBtn" aria-label="Aggiungi ai preferiti"><span class="ic"></span></button>
+    </div>
+
+    <div class="fp-scrubber">
+      <div class="fp-seek-track" id="fpSeekTrack">
+        <div class="fp-seek-fill" id="fpSeekFill"></div>
+        <div class="fp-seek-handle" id="fpSeekHandle"></div>
+      </div>
+      <div class="fp-time-row">
+        <span id="fpTimeCurrent">0:00</span>
+        <span id="fpTimeRemaining">0:00</span>
+      </div>
+    </div>
+
+    <div class="fp-controls">
+      <button type="button" class="icon-btn fp-shuffle-btn" id="fpShuffleBtn" aria-label="Riproduzione casuale"><span class="ic"></span></button>
+      <button type="button" class="icon-btn fp-prev-btn" id="fpPrevBtn" aria-label="Precedente"><span class="ic"></span></button>
+      <button type="button" class="fp-play-btn" id="fpPlayBtn" aria-label="Play"><span class="ic"></span></button>
+      <button type="button" class="icon-btn fp-next-btn" id="fpNextBtn" aria-label="Successivo"><span class="ic"></span></button>
+      <button type="button" class="icon-btn fp-repeat-btn" id="fpRepeatBtn" aria-label="Ripeti"><span class="ic"></span></button>
+    </div>
+
+    <div class="fp-bottom-row">
+      <button type="button" class="pill-btn" id="fpQueueBtn2" aria-label="Coda"><span class="ic"></span></button>
+      <button type="button" class="pill-btn" id="fpPlaylistBtn" aria-label="Aggiungi a playlist"><span class="ic"></span></button>
+      <button type="button" class="pill-btn" id="fpLyricsBtn" aria-label="Testo"><span class="ic"></span></button>
+      <button type="button" class="pill-btn" id="fpShareBtn" aria-label="Condividi"><span class="ic"></span></button>
+    </div>
+
+    <div class="fp-lyrics-panel hidden" id="fpLyricsPanel">
+      <div class="fp-lyrics-head">
+        <span>Testo</span>
+        <button type="button" class="icon-btn" id="fpLyricsCloseBtn" aria-label="Chiudi testo"><span class="ic"></span></button>
+      </div>
+      <div class="fp-lyrics-body" id="fpLyricsBody">Caricamento testo...</div>
+    </div>
+  </div>
+
+  <!-- hidden real youtube player, positioned over whichever cover is active -->
+  <div id="ytPlayerWrap" class="yt-player-wrap">
+    <div id="ytplayer"></div>
+  </div>
+
+  <!-- Silent local keep-alive anchor — see setupBackgroundAudioResilience()
+       in app.js for why this exists. Not shown to the user, never given its
+       own MediaSession metadata; the real audio is still the YouTube iframe. -->
+  <audio id="silentKeepAlive" src="silence.wav" loop playsinline preload="auto"></audio>
+
+  <div id="modalRoot"></div>
+  <div id="toastRoot"></div>
+
+</div>
+
+<script src="https://www.youtube.com/iframe_api"></script>
+<script src="app.js"></script>
+</body>
+</html>
