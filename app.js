@@ -89,43 +89,6 @@ const player = {
   duration: 0,
 };
 
-/* =========================================================
-   Debug overlay — opt-in via ?debug=1 in the URL, read-only.
-   Only reads player state and writes to its own on-screen div; never
-   sends any command to the YouTube player, so it carries none of the
-   "auto-command based on inferred state" risk documented elsewhere in
-   this file. Exists to turn vague real-device symptoms ("it stops
-   around 6 seconds") into exact, reportable data (state transitions,
-   timestamps, duration, mute/volume) without needing a Mac + Safari's
-   remote Web Inspector.
-   ========================================================= */
-const DEBUG_MODE = location.search.indexOf('debug=1') !== -1;
-const debugLog = [];
-let debugStartTime = 0;
-const YT_STATE_NAMES = { '-1': 'UNSTARTED', 0: 'ENDED', 1: 'PLAYING', 2: 'PAUSED', 3: 'BUFFERING', 5: 'CUED' };
-function debugLogEvent(label) {
-  if (!DEBUG_MODE) return;
-  let t = 0, d = 0, muted = null, vol = null;
-  try { t = player.ytPlayer.getCurrentTime(); } catch (e) { /* player not ready */ }
-  try { d = player.ytPlayer.getDuration(); } catch (e) { /* player not ready */ }
-  try { muted = player.ytPlayer.isMuted(); } catch (e) { /* player not ready */ }
-  try { vol = player.ytPlayer.getVolume(); } catch (e) { /* player not ready */ }
-  const elapsed = ((performance.now() - debugStartTime) / 1000).toFixed(1);
-  debugLog.push(`+${elapsed}s ${label} t=${t.toFixed(1)} d=${d.toFixed(1)} muted=${muted} vol=${vol}`);
-  if (debugLog.length > 30) debugLog.shift();
-  const el = document.getElementById('debugOverlay');
-  if (el) el.textContent = debugLog.join('\n');
-}
-function setupDebugOverlay() {
-  if (!DEBUG_MODE) return;
-  debugStartTime = performance.now();
-  const el = document.createElement('div');
-  el.id = 'debugOverlay';
-  el.style.cssText = 'position:fixed;top:0;left:0;right:0;max-height:45vh;overflow-y:auto;background:rgba(0,0,0,.88);color:#0f0;font:10px/1.4 monospace;padding:6px 8px;z-index:99999;white-space:pre-wrap;pointer-events:none;';
-  document.body.appendChild(el);
-  debugLogEvent('OVERLAY-READY');
-}
-
 function currentTrack() {
   return player.currentIndex >= 0 ? player.queue[player.currentIndex] : null;
 }
@@ -1149,7 +1112,7 @@ function onYouTubeIframeAPIReady() {
     // a real, concrete gap: some embedding contexts can silently reject
     // player commands without it, which fits "plays fine on desktop,
     // silently does nothing on a real device" exactly.
-    playerVars: { playsinline: 1, controls: 0, disablekb: 1, fs: 0, modestbranding: 1, rel: 0, origin: location.origin },
+    playerVars: { playsinline: 1, controls: 0, disablekb: 1, fs: 0, modestbranding: 1, rel: 0, origin: location.origin, mute: 1 },
     events: {
       onReady: () => { player.ytReady = true; },
       onStateChange: onPlayerStateChange,
@@ -1163,8 +1126,7 @@ function onYouTubeIframeAPIReady() {
 }
 window.onYouTubeIframeAPIReady = onYouTubeIframeAPIReady;
 
-function onPlayerError(e) {
-  debugLogEvent('ERROR code=' + (e && e.data));
+function onPlayerError() {
   showToast('Brano non disponibile, passo al successivo');
   const next = getNextIndex();
   if (next !== null) playIndex(next);
@@ -1180,16 +1142,23 @@ function onPlayerError(e) {
 // consumed exactly once, the first time PLAYING is reported for that load.
 let pendingAutoplayCorrection = false;
 
-// Mute-before-load was tried three ways this session (event-only, event +
-// 3s forced-unmute fallback, event-only again to match the original exactly)
-// specifically to test whether an ad system skips serving an ad to a player
-// that signals muted at request time. None of the three variants changed
-// observed ad frequency at all — the theory is not supported by real-device
-// testing, so this stays removed. Tapping "Play" is already a direct user
-// gesture, which unmuted autoplay is allowed to ride on in every major
-// browser, so no mute trick is needed for this synchronous tap path anyway.
+// Real-device signal (confirmed live, not guessed): tapping a track shows
+// the mini-player correctly (title/cover render) but produces zero audio,
+// and — crucially — no onError ever fires either. That combination is the
+// signature of the browser's own autoplay policy silently swallowing the
+// audio at the OS/chrome level: from the YouTube player's own perspective
+// nothing went wrong, so it never reports an error; it just never actually
+// lets sound out. Muted autoplay has no gesture requirement on any
+// browser, so every load starts muted, then unmutes itself the moment
+// PLAYING actually confirms the video is running — a standard mitigation
+// for exactly this failure signature. (A previous round removed this,
+// reasoning that a sibling project's code didn't need it — but that
+// reasoning rested on a false premise: that sibling was only ever verified
+// through this same sandboxed preview, never on a real iOS device either,
+// so its working without this trick proves nothing about real iOS.)
+let pendingUnmute = false;
+
 function onPlayerStateChange(e) {
-  debugLogEvent('STATE ' + (YT_STATE_NAMES[e.data] || e.data));
   if (e.data === YT.PlayerState.ENDED) { onTrackEnded(); return; }
   // The real YouTube player state is the source of truth for isPlaying —
   // togglePlayPause() only flips it optimistically for instant tap feedback,
@@ -1203,6 +1172,10 @@ function onPlayerStateChange(e) {
       pendingAutoplayCorrection = false;
       try { player.ytPlayer.pauseVideo(); } catch (e2) { /* nothing more we can do here */ }
       return; // the pauseVideo() call above will emit its own PAUSED event
+    }
+    if (pendingUnmute) {
+      pendingUnmute = false;
+      try { player.ytPlayer.unMute(); player.ytPlayer.setVolume(100); } catch (e2) { /* not worth surfacing — playback itself still proceeds */ }
     }
     if (!player.isPlaying) { player.isPlaying = true; updatePlayerUI(); }
   }
@@ -1259,9 +1232,10 @@ let pendingLoadPollId = null;
 // nothing at all — now guarded, and the caller order was fixed too (see
 // playIndex()).
 function startPlaybackFor(track) {
-  if (DEBUG_MODE) { debugStartTime = performance.now(); debugLogEvent('LOAD ' + track.id + ' ' + track.title); }
   try {
     pendingAutoplayCorrection = !player.isPlaying;
+    pendingUnmute = true;
+    player.ytPlayer.mute();
     player.ytPlayer.loadVideoById(track.id);
   } catch (e) {
     showToast('Errore durante l\'avvio della riproduzione');
@@ -1453,9 +1427,7 @@ function setPositionState(forcedPosition) {
       // what made the scrubber keep creeping forward after real playback
       // had already stopped (see the callers below for why this alone
       // isn't enough — call frequency was the other half of the bug).
-      const rate = player.isPlaying ? 1 : 0;
-      debugLogEvent(`POS pos=${position.toFixed(1)} dur=${duration.toFixed(1)} rate=${rate}`);
-      navigator.mediaSession.setPositionState({ duration, playbackRate: rate, position });
+      navigator.mediaSession.setPositionState({ duration, playbackRate: player.isPlaying ? 1 : 0, position });
     }
   } catch (e) { /* player not ready for this call yet */ }
 }
@@ -1609,9 +1581,6 @@ function setupPlaybackTicker() {
     // run past it by the next 500ms tick — a continuous, visible sawtooth.
     if (tickCount % 10 === 0) setPositionState();
     if (seekBarTickFn) seekBarTickFn();
-    // periodic sample even without a discrete state-change event, so a
-    // stuck/looping state that never fires onStateChange still shows up
-    if (DEBUG_MODE && tickCount % 2 === 0) debugLogEvent('tick');
   }, 500);
 }
 
@@ -1885,7 +1854,6 @@ function fixStandaloneViewport() {
 }
 
 function boot() {
-  setupDebugOverlay();
   fixStandaloneViewport();
   updateGreeting();
   setupNav();
