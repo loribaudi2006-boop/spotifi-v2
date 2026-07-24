@@ -1377,7 +1377,6 @@ function updatePlayerUI() {
   $('#fpLikeBtn').classList.toggle('liked', isLiked(t.id));
   setIcon($('#fpPlayBtn'), player.isPlaying ? ICONS.pause : ICONS.play);
   refreshNowPlayingHighlight();
-  syncVideoOverlay();
 }
 
 // Marks whichever track-row/card/tile currently on screen matches the
@@ -1633,9 +1632,6 @@ function openFullPlayer() {
   // fade the blurred backdrop in only once the (cheap, sharp-content-only)
   // slide-up has actually finished — see the .fp-bg CSS comment
   setTimeout(() => $('#fpBg').classList.add('visible'), 400);
-  // same reasoning for the real video overlay: measuring #fpCover's rect
-  // while the panel is still mid-slide-up would capture stale coordinates
-  setTimeout(syncVideoOverlay, 400);
   refreshMiniPlayerElevation();
 }
 function closeFullPlayer() {
@@ -1646,40 +1642,8 @@ function closeFullPlayer() {
     fp.classList.add('hidden');
     fp.classList.remove('closing');
     refreshMiniPlayerElevation();
-    syncVideoOverlay();
   }, 250);
 }
-
-// Shows the real YouTube video over the full player's cover art instead of
-// the static thumbnail, whenever the full player is open and a track is
-// current — reuses the same, always-alive #ytPlayerWrap (never destroys or
-// recreates the iframe, which would restart playback); just repositions it
-// to match #fpCover's rect and toggles its visibility. Parked back at its
-// default hidden 160x90 corner spot when the full player isn't open, which
-// keeps the "real, non-zero size" mitigation from getting throttled in the
-// background (see the .yt-player-wrap CSS comment) intact either way.
-function syncVideoOverlay() {
-  const wrap = $('#ytPlayerWrap');
-  const fp = $('#fullPlayer');
-  const cover = $('#fpCover');
-  if (!wrap || !cover) return;
-  if (fp.classList.contains('hidden') || !currentTrack()) {
-    wrap.classList.remove('visible');
-    wrap.style.top = '';
-    wrap.style.left = '';
-    wrap.style.width = '';
-    wrap.style.height = '';
-    return;
-  }
-  const rect = cover.getBoundingClientRect();
-  if (rect.width === 0 || rect.height === 0) return;
-  wrap.style.top = rect.top + 'px';
-  wrap.style.left = rect.left + 'px';
-  wrap.style.width = rect.width + 'px';
-  wrap.style.height = rect.height + 'px';
-  wrap.classList.add('visible');
-}
-window.addEventListener('resize', () => syncVideoOverlay());
 
 // Keeps the mini-player visible above a regular modal's dark scrim (see the
 // .mini-player.elevated CSS comment) without ever letting it float above

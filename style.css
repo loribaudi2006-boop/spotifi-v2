@@ -27,7 +27,6 @@
   --z-nav: 20;
   --z-miniplayer: 30;
   --z-fullplayer: 50;
-  --z-video: 52;
   --z-modal: 100;
   --z-toast: 200;
 
@@ -762,16 +761,6 @@ body.has-now-playing .modal-overlay .modal {
   opacity: 0.01;
   pointer-events: none;
   transition: none;
-}
-/* Shown over the full player's cover art while a track plays, matching its
-   rect exactly (set via JS in syncVideoOverlay()) — z-index above the full
-   player (50) and below any modal/toast (100+), pointer-events stays off so
-   it never steals the swipe-to-dismiss/drag gestures already bound to
-   .fp-cover-wrap. */
-.yt-player-wrap.visible {
-  opacity: 1;
-  z-index: var(--z-video);
-  border-radius: var(--r-lg);
 }
 #ytplayer, #ytplayer iframe { width: 100%; height: 100%; }
 
