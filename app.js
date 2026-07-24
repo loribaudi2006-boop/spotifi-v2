@@ -1149,7 +1149,7 @@ function onYouTubeIframeAPIReady() {
     // a real, concrete gap: some embedding contexts can silently reject
     // player commands without it, which fits "plays fine on desktop,
     // silently does nothing on a real device" exactly.
-    playerVars: { playsinline: 1, controls: 0, disablekb: 1, fs: 0, modestbranding: 1, rel: 0, origin: location.origin, mute: 1 },
+    playerVars: { playsinline: 1, controls: 0, disablekb: 1, fs: 0, modestbranding: 1, rel: 0, origin: location.origin },
     events: {
       onReady: () => { player.ytReady = true; },
       onStateChange: onPlayerStateChange,
@@ -1180,34 +1180,20 @@ function onPlayerError(e) {
 // consumed exactly once, the first time PLAYING is reported for that load.
 let pendingAutoplayCorrection = false;
 
-// Real-device signal (confirmed live, not guessed): tapping a track shows
-// the mini-player correctly (title/cover render) but produces zero audio,
-// and — crucially — no onError ever fires either. That combination is the
-// signature of the browser's own autoplay policy silently swallowing the
-// audio at the OS/chrome level: from the YouTube player's own perspective
-// nothing went wrong, so it never reports an error; it just never actually
-// lets sound out. Muted autoplay has no gesture requirement on any
-// browser, so every load starts muted, then unmutes itself the moment
-// PLAYING actually confirms the video is running — a standard mitigation
-// for exactly this failure signature. (A previous round removed this,
-// reasoning that a sibling project's code didn't need it — but that
-// reasoning rested on a false premise: that sibling was only ever verified
-// through this same sandboxed preview, never on a real iOS device either,
-// so its working without this trick proves nothing about real iOS.)
-//
-// This MUST stay one-shot (consumed once, not re-sent on every PLAYING
-// event) — a version that called unMute()/setVolume() on every PLAYING
-// transition was tried and reverted within the same session: on a real
-// iPhone it produced a 2-second play/restart loop on the lock screen,
-// the exact same failure signature already documented above for
-// tryResumeIfNeeded()'s old auto-playVideo()-on-PAUSED logic (see the
-// eighteenth pass). That confirms the lesson generalizes beyond
-// playVideo(): ANY repeated write-command sent to the real YouTube
-// iframe in response to an inferred/recurring state (not a one-time,
-// explicit action) risks the same reinitialize-and-restart behavior on
-// real iOS hardware, not just playVideo() specifically.
-let pendingUnmute = false;
-
+// Removed the mute()-before-load / unMute()-on-PLAYING trick that lived
+// here for several sessions (mute:1 in playerVars, mute() before every
+// loadVideoById(), unMute()+setVolume(100) consumed once on the first
+// real PLAYING event). It was always speculative — added on a plausible
+// theory, never actually confirmed to fix anything, removed once, re-added
+// on a since-corrected false premise — and the ?debug=1 overlay's first
+// real on-device capture (twenty-eighth pass) directly incriminated it:
+// muted stayed true for 15+ seconds straight and no PLAYING event was ever
+// logged at all, even though getCurrentTime() was genuinely advancing —
+// meaning the unmute could never fire, and the permanently-muted, silently
+// resetting-every-~8s video is exactly what was captured. Tapping "Play"
+// is already a direct user gesture, which unmuted autoplay is allowed to
+// ride on in every major browser, so the mute trick was never actually
+// necessary for this synchronous tap path in the first place.
 function onPlayerStateChange(e) {
   debugLogEvent('STATE ' + (YT_STATE_NAMES[e.data] || e.data));
   if (e.data === YT.PlayerState.ENDED) { onTrackEnded(); return; }
@@ -1223,10 +1209,6 @@ function onPlayerStateChange(e) {
       pendingAutoplayCorrection = false;
       try { player.ytPlayer.pauseVideo(); } catch (e2) { /* nothing more we can do here */ }
       return; // the pauseVideo() call above will emit its own PAUSED event
-    }
-    if (pendingUnmute) {
-      pendingUnmute = false;
-      try { player.ytPlayer.unMute(); player.ytPlayer.setVolume(100); } catch (e2) { /* not worth surfacing — playback itself still proceeds */ }
     }
     if (!player.isPlaying) { player.isPlaying = true; updatePlayerUI(); }
   }
@@ -1286,8 +1268,6 @@ function startPlaybackFor(track) {
   if (DEBUG_MODE) { debugStartTime = performance.now(); debugLogEvent('LOAD ' + track.id + ' ' + track.title); }
   try {
     pendingAutoplayCorrection = !player.isPlaying;
-    pendingUnmute = true;
-    player.ytPlayer.mute();
     player.ytPlayer.loadVideoById(track.id);
   } catch (e) {
     showToast('Errore durante l\'avvio della riproduzione');
