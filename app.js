@@ -1156,7 +1156,6 @@ let pendingAutoplayCorrection = false;
 // reasoning rested on a false premise: that sibling was only ever verified
 // through this same sandboxed preview, never on a real iOS device either,
 // so its working without this trick proves nothing about real iOS.)
-let pendingUnmute = false;
 
 function onPlayerStateChange(e) {
   if (e.data === YT.PlayerState.ENDED) { onTrackEnded(); return; }
@@ -1173,10 +1172,17 @@ function onPlayerStateChange(e) {
       try { player.ytPlayer.pauseVideo(); } catch (e2) { /* nothing more we can do here */ }
       return; // the pauseVideo() call above will emit its own PAUSED event
     }
-    if (pendingUnmute) {
-      pendingUnmute = false;
-      try { player.ytPlayer.unMute(); player.ytPlayer.setVolume(100); } catch (e2) { /* not worth surfacing — playback itself still proceeds */ }
-    }
+    // Re-assert unmuted+full-volume on EVERY real PLAYING transition, not
+    // just the first one after loadVideoById() (a one-shot flag consumed
+    // here previously). A monetized video plays its own short pre-roll ad
+    // first — a real, separate PLAYING/duration cycle for the ad itself,
+    // ending and handing off to the real track's own PLAYING event — and a
+    // one-shot unmute consumed by the ad's PLAYING event never re-fired for
+    // that handoff, plausibly leaving the real song muted even though the
+    // ad briefly had sound enabled. This call is cheap and idempotent
+    // (unmuting an already-unmuted player is a harmless no-op), so doing it
+    // on every PLAYING event is safe.
+    try { player.ytPlayer.unMute(); player.ytPlayer.setVolume(100); } catch (e2) { /* not worth surfacing — playback itself still proceeds */ }
     if (!player.isPlaying) { player.isPlaying = true; updatePlayerUI(); }
   }
   if (e.data === YT.PlayerState.PAUSED) {
@@ -1234,7 +1240,6 @@ let pendingLoadPollId = null;
 function startPlaybackFor(track) {
   try {
     pendingAutoplayCorrection = !player.isPlaying;
-    pendingUnmute = true;
     player.ytPlayer.mute();
     player.ytPlayer.loadVideoById(track.id);
   } catch (e) {
