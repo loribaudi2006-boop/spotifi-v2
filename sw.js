@@ -1,4 +1,4 @@
-const CACHE_NAME = 'spotifi-shell-v17';
+const CACHE_NAME = 'spotifi-shell-v20';
 
 const APP_SHELL = [
   './',
@@ -6,7 +6,6 @@ const APP_SHELL = [
   './style.css',
   './app.js',
   './manifest.json',
-  './silence.wav',
   './icons/icon.png',
   './icons/icon-192.png',
   './icons/icon-maskable.png',

@@ -79,14 +79,11 @@ function saveDB() { localStorage.setItem(DB_KEY, JSON.stringify(db)); }
    Player state
    ========================================================= */
 const player = {
-  ytPlayer: null,
-  ytReady: false,
   queue: [],
   currentIndex: -1,
   isPlaying: false,
   shuffle: false,
   repeatMode: 'off', // off | all | one
-  duration: 0,
 };
 
 function currentTrack() {
@@ -1101,87 +1098,124 @@ async function fetchLyrics(track) {
 }
 
 /* =========================================================
-   YouTube IFrame player + queue/playback control
+   Playback engine — real <audio> element fed by spotifi-stream-proxy
+   (a small Cloudflare Worker resolving a YouTube video ID to a direct
+   audio URL via cobalt, see C:\Users\user\Documents\spotifi-stream-proxy).
+   A real top-level <audio> element (not a cross-origin YouTube iframe) is
+   what makes background/lock-screen playback and MediaSession reliable —
+   the whole class of postMessage-polling/state-inference bugs that
+   dominated this project's history (stall detectors, mute/unmute autoplay
+   workarounds, the lock-screen sawtooth) doesn't apply here: play/pause/
+   ended/error are real, synchronous browser events.
    ========================================================= */
-function onYouTubeIframeAPIReady() {
-  player.ytPlayer = new YT.Player('ytplayer', {
-    height: '90', width: '160',
-    // origin was missing here — YouTube's iframe uses it to validate
-    // postMessage commands from the parent page, and a real diff against
-    // a confirmed-working sibling project (sonique sigma) surfaced this as
-    // a real, concrete gap: some embedding contexts can silently reject
-    // player commands without it, which fits "plays fine on desktop,
-    // silently does nothing on a real device" exactly.
-    playerVars: { playsinline: 1, controls: 0, disablekb: 1, fs: 0, modestbranding: 1, rel: 0, origin: location.origin, mute: 1 },
-    events: {
-      onReady: () => { player.ytReady = true; },
-      onStateChange: onPlayerStateChange,
-      // Also missing before — with no onError handler, a genuine playback
-      // failure (video unavailable, embedding disabled by the uploader,
-      // region lock, etc.) had no way to ever reach the user; it just
-      // looked exactly like "nothing happens when I tap a track".
-      onError: onPlayerError,
-    },
-  });
-}
-window.onYouTubeIframeAPIReady = onYouTubeIframeAPIReady;
+const STREAM_PROXY_BASE = 'https://spotifi-stream-proxy.loribaudi2006.workers.dev';
+const audioEl = $('#audioEl');
 
-function onPlayerError() {
+async function resolveStreamUrl(videoId) {
+  try {
+    const res = await fetch(`${STREAM_PROXY_BASE}/streams/${videoId}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return (data && data.url) || null;
+  } catch (e) { return null; }
+}
+
+// Bumped every time a new track is picked — lets an in-flight resolve/blob
+// fetch for a PREVIOUS track detect it's been superseded and bail out
+// instead of clobbering whatever's playing now.
+let playbackToken = 0;
+let currentBlobUrl = null;
+function releaseCurrentBlobUrl() {
+  if (currentBlobUrl) { URL.revokeObjectURL(currentBlobUrl); currentBlobUrl = null; }
+}
+
+// audioEl.removeAttribute('src'); audioEl.load() (used to reset the element
+// before loading a new track) can itself fire a spurious 'error' event on
+// some browsers, since there's momentarily no supported source — must not
+// be mistaken for a real playback failure.
+let suppressNextAudioError = false;
+// Caps the cobalt-resolve-tunnel-expired auto-retry (see the 'error'
+// listener below) at one attempt, so a genuinely broken track can't loop.
+let awaitingErrorRetry = false;
+
+function handlePlaybackFailure() {
   showToast('Brano non disponibile, passo al successivo');
   const next = getNextIndex();
   if (next !== null) playIndex(next);
+  else { player.isPlaying = false; updatePlayerUI(); }
 }
 
-// loadVideoById() always auto-starts the new video, regardless of what the
-// user tapped while it was still loading. If the user hit pause during
-// that window, the reconciliation logic below (which normally treats the
-// real player as the source of truth) would otherwise force isPlaying back
-// to true the instant the new track starts — silently discarding the
-// user's pause and making the button look like it "didn't work". Set right
-// before every loadVideoById() call to the desired state at that moment;
-// consumed exactly once, the first time PLAYING is reported for that load.
-let pendingAutoplayCorrection = false;
+// Resolves a fresh stream URL (never reused — cobalt's tunnel URLs expire
+// in well under two minutes, confirmed by testing) and starts streaming it
+// immediately for instant playback. In parallel, downloads the same URL
+// fully in the background and swaps to it once ready (see
+// upgradeToSeekableBlob) — the tunnel doesn't support HTTP Range, so the
+// browser can't seek an in-progress stream precisely, but a fully-
+// downloaded blob is instantly and exactly seekable.
+async function startPlaybackFor(track, isRetry) {
+  const myToken = ++playbackToken;
+  awaitingErrorRetry = isRetry === true;
+  releaseCurrentBlobUrl();
+  suppressNextAudioError = true;
+  audioEl.removeAttribute('src');
+  audioEl.load();
 
-// Real-device signal (confirmed live, not guessed): tapping a track shows
-// the mini-player correctly (title/cover render) but produces zero audio,
-// and — crucially — no onError ever fires either. That combination is the
-// signature of the browser's own autoplay policy silently swallowing the
-// audio at the OS/chrome level: from the YouTube player's own perspective
-// nothing went wrong, so it never reports an error; it just never actually
-// lets sound out. Muted autoplay has no gesture requirement on any
-// browser, so every load starts muted, then unmutes itself the moment
-// PLAYING actually confirms the video is running — a standard mitigation
-// for exactly this failure signature. (A previous round removed this,
-// reasoning that a sibling project's code didn't need it — but that
-// reasoning rested on a false premise: that sibling was only ever verified
-// through this same sandboxed preview, never on a real iOS device either,
-// so its working without this trick proves nothing about real iOS.)
-let pendingUnmute = false;
+  const streamUrl = await resolveStreamUrl(track.id);
+  if (myToken !== playbackToken) return; // a different track was picked meanwhile
+  if (!streamUrl) { handlePlaybackFailure(); return; }
 
-function onPlayerStateChange(e) {
-  if (e.data === YT.PlayerState.ENDED) { onTrackEnded(); return; }
-  // The real YouTube player state is the source of truth for isPlaying —
-  // togglePlayPause() only flips it optimistically for instant tap feedback,
-  // and without reconciling against what the player actually did, any silent
-  // failure (blocked autoplay, a slow buffer, a lock-screen action) could
-  // leave the in-app button permanently out of sync with reality, making
-  // play/pause/stop look "stuck" until the app happened to resync itself.
-  if (e.data === YT.PlayerState.PLAYING) {
-    try { player.duration = player.ytPlayer.getDuration() || player.duration; } catch (e2) { /* keep last known duration */ }
-    if (pendingAutoplayCorrection) {
-      pendingAutoplayCorrection = false;
-      try { player.ytPlayer.pauseVideo(); } catch (e2) { /* nothing more we can do here */ }
-      return; // the pauseVideo() call above will emit its own PAUSED event
-    }
-    if (pendingUnmute) {
-      pendingUnmute = false;
-      try { player.ytPlayer.unMute(); player.ytPlayer.setVolume(100); } catch (e2) { /* not worth surfacing — playback itself still proceeds */ }
-    }
+  suppressNextAudioError = false;
+  audioEl.src = streamUrl;
+  try { await audioEl.play(); } catch (e) { /* 'pause'/'error' listeners reflect whatever actually happened */ }
+  upgradeToSeekableBlob(streamUrl, myToken);
+}
+
+async function upgradeToSeekableBlob(streamUrl, myToken) {
+  let blob;
+  try {
+    const res = await fetch(streamUrl);
+    if (!res.ok) return;
+    blob = await res.blob();
+  } catch (e) { return; } // fine to just stay on the streamed source
+  if (myToken !== playbackToken) return; // superseded — discard, don't touch the element
+
+  const pos = audioEl.currentTime;
+  const wasPlaying = !audioEl.paused;
+  const objUrl = URL.createObjectURL(blob);
+  releaseCurrentBlobUrl();
+  currentBlobUrl = objUrl;
+  suppressNextAudioError = true;
+  audioEl.src = objUrl;
+  audioEl.currentTime = pos;
+  suppressNextAudioError = false;
+  if (wasPlaying) { try { await audioEl.play(); } catch (e) { /* ignore */ } }
+}
+
+function setupAudioEngine() {
+  audioEl.addEventListener('play', () => {
     if (!player.isPlaying) { player.isPlaying = true; updatePlayerUI(); }
-  }
-  if (e.data === YT.PlayerState.PAUSED) {
+  });
+  audioEl.addEventListener('pause', () => {
+    // Fires for every real pause: a user tap, a MediaSession pause, iOS
+    // suspending background audio, AND the brief internal pause the
+    // browser does when we swap audioEl.src (track change / blob upgrade)
+    // — 'play' fires again immediately after in that last case, so a
+    // momentary isPlaying flicker there is harmless.
     if (player.isPlaying) { player.isPlaying = false; updatePlayerUI(); }
-  }
+  });
+  audioEl.addEventListener('ended', onTrackEnded);
+  audioEl.addEventListener('durationchange', () => setPositionState());
+  audioEl.addEventListener('seeked', () => setPositionState());
+  audioEl.addEventListener('error', () => {
+    if (suppressNextAudioError) return;
+    const t = currentTrack();
+    if (!t) return;
+    if (awaitingErrorRetry) { handlePlaybackFailure(); return; }
+    // Most likely cause mid-stream: the resolved tunnel URL expired —
+    // re-resolving is the correct fix, not a blind auto-retry of the same
+    // dead URL.
+    startPlaybackFor(t, true);
+  });
 }
 
 function playQueue(list, startIndex) {
@@ -1198,74 +1232,14 @@ function playIndex(index) {
   updatePlayerUI();
   updateAmbientBg();
   updateMediaSession();
-  // These UI-feedback lines are deliberately BEFORE loadTrackIntoPlayer()
-  // now, not after — loadTrackIntoPlayer() calls into the third-party
-  // YouTube iframe's API (mute/loadVideoById), which is guarded by
-  // try/catch there but is still a call into someone else's code; if
-  // anything in that chain ever threw, every line after it in the old
-  // order would silently never run, meaning the user could tap a track
-  // and see literally nothing happen — no mini-player, no feedback at
-  // all, which is indistinguishable from "the app is just broken". Now
-  // the mini-player always appears the instant a track is chosen,
-  // regardless of whether the underlying playback call succeeds.
+  // UI feedback (mini-player, elevation) always shown immediately,
+  // regardless of how long the stream-proxy resolve takes.
   $('#miniPlayer').classList.remove('hidden');
   document.body.classList.add('has-now-playing'); // reserves modal bottom space — see .mini-player.elevated
   refreshMiniPlayerElevation(); // covers starting playback from a modal that was ALREADY open (no modalRoot mutation happens in that case)
-  ensureKeepAliveAudioPlaying();
-  loadTrackIntoPlayer(track);
+  startPlaybackFor(track);
 }
 
-// On a slow mobile connection the YouTube iframe_api script (and the
-// player's own onReady callback) can easily take longer than a single
-// short timeout, silently dropping the play request — poll instead, and
-// only honor the poll's result if the user hasn't since picked a
-// different track.
-let pendingLoadTrackId = null;
-let pendingLoadPollId = null;
-// The actual YT.Player API calls (mute/loadVideoById/etc.) are calls into a
-// third-party, cross-origin iframe — if any of them ever throws (a stale
-// reference, the iframe not truly ready despite our own ytReady flag, a
-// postMessage-bridge hiccup), that must never be allowed to silently abort
-// whatever function called it. A real bug from exactly this class was
-// caught here: loadTrackIntoPlayer() used to run before the mini-player
-// was shown, so a throw here could make tapping a track look like it did
-// nothing at all — now guarded, and the caller order was fixed too (see
-// playIndex()).
-function startPlaybackFor(track) {
-  try {
-    pendingAutoplayCorrection = !player.isPlaying;
-    pendingUnmute = true;
-    player.ytPlayer.mute();
-    player.ytPlayer.loadVideoById(track.id);
-  } catch (e) {
-    showToast('Errore durante l\'avvio della riproduzione');
-  }
-}
-
-function loadTrackIntoPlayer(track) {
-  if (pendingLoadPollId) { clearInterval(pendingLoadPollId); pendingLoadPollId = null; }
-  if (player.ytReady) {
-    pendingLoadTrackId = null;
-    startPlaybackFor(track);
-    return;
-  }
-  pendingLoadTrackId = track.id;
-  let attempts = 0;
-  pendingLoadPollId = setInterval(() => {
-    attempts++;
-    if (player.ytReady) {
-      clearInterval(pendingLoadPollId);
-      pendingLoadPollId = null;
-      if (pendingLoadTrackId === track.id) startPlaybackFor(track);
-      return;
-    }
-    if (attempts > 30) {
-      clearInterval(pendingLoadPollId);
-      pendingLoadPollId = null;
-      if (pendingLoadTrackId === track.id) showToast('Impossibile avviare la riproduzione: controlla la connessione');
-    }
-  }, 300);
-}
 function addToRecent(track) {
   db.recentTracks = db.recentTracks.filter((t) => t.id !== track.id);
   db.recentTracks.unshift(track);
@@ -1296,13 +1270,11 @@ function getPrevIndex() {
 
 function togglePlayPause() {
   if (!currentTrack()) return;
-  player.isPlaying = !player.isPlaying; // optimistic — don't wait for the iframe's async state event
-  updatePlayerUI();
-  if (player.ytReady) {
-    try {
-      if (player.isPlaying) player.ytPlayer.playVideo(); else player.ytPlayer.pauseVideo();
-    } catch (e) { /* UI already updated above regardless */ }
-  }
+  // No optimistic flip needed — audioEl's own 'play'/'pause' events (see
+  // setupAudioEngine) are real, near-synchronous browser events, not an
+  // async postMessage round-trip, so they're fast enough to drive the UI
+  // directly without a separate reconciliation step.
+  if (audioEl.paused) audioEl.play().catch(() => {}); else audioEl.pause();
 }
 function playNext() { const i = getNextIndex(); if (i !== null) playIndex(i); }
 function playPrev() { const i = getPrevIndex(); if (i !== null) playIndex(i); }
@@ -1400,86 +1372,31 @@ function updateMediaSession() {
   // explicit direction, never a blind toggle — a lock-screen "pause" tap
   // must always pause even if our internal isPlaying had drifted from
   // reality, otherwise it can appear to do nothing or do the opposite
-  navigator.mediaSession.setActionHandler('play', () => { if (!player.isPlaying) togglePlayPause(); });
-  navigator.mediaSession.setActionHandler('pause', () => { if (player.isPlaying) togglePlayPause(); });
+  navigator.mediaSession.setActionHandler('play', () => audioEl.play().catch(() => {}));
+  navigator.mediaSession.setActionHandler('pause', () => audioEl.pause());
   navigator.mediaSession.setActionHandler('previoustrack', () => playPrev());
   navigator.mediaSession.setActionHandler('nexttrack', () => playNext());
-  navigator.mediaSession.setActionHandler('stop', () => {
-    player.isPlaying = false;
-    updatePlayerUI();
-    try { player.ytPlayer && player.ytPlayer.pauseVideo(); } catch (e) { /* UI already reflects stopped */ }
-  });
+  navigator.mediaSession.setActionHandler('stop', () => audioEl.pause());
   navigator.mediaSession.setActionHandler('seekto', (details) => {
-    if (!player.ytReady || details.seekTime == null) return;
-    try { player.ytPlayer.seekTo(details.seekTime, true); } catch (e) { /* setPositionState below still forces the display to the intended target */ }
-    setPositionState(details.seekTime);
+    if (details.seekTime == null || !isFinite(audioEl.duration)) return;
+    audioEl.currentTime = details.seekTime; // 'seeked' listener pushes the resulting position state
   });
 }
 function setPositionState(forcedPosition) {
-  if (!('mediaSession' in navigator) || !player.ytReady || !currentTrack()) return;
+  if (!('mediaSession' in navigator) || !currentTrack()) return;
+  const duration = audioEl.duration;
+  // Not known yet while still on the streamed (pre-blob-upgrade) source —
+  // see upgradeToSeekableBlob; the OS just keeps showing "unknown length"
+  // until this fires again once duration becomes available.
+  if (!isFinite(duration) || duration <= 0) return;
+  const position = forcedPosition != null ? forcedPosition : audioEl.currentTime;
+  if (position > duration) return;
   try {
-    const duration = player.ytPlayer.getDuration();
-    const position = forcedPosition != null ? forcedPosition : player.ytPlayer.getCurrentTime();
-    if (duration > 0 && position <= duration) {
-      // playbackRate must reflect isPlaying, never a hardcoded 1 — the OS
-      // extrapolates the lock-screen scrubber forward at this rate between
-      // calls, so asserting "1" while actually paused/stalled is exactly
-      // what made the scrubber keep creeping forward after real playback
-      // had already stopped (see the callers below for why this alone
-      // isn't enough — call frequency was the other half of the bug).
-      navigator.mediaSession.setPositionState({ duration, playbackRate: player.isPlaying ? 1 : 0, position });
-    }
-  } catch (e) { /* player not ready for this call yet */ }
-}
-
-/* No longer calls playVideo() automatically when a pause is detected here —
-   a broader stall-detector AND, it turns out, even this narrower
-   PAUSED-only auto-resume were both tried and both produced the same
-   real-device symptom: a track playing for a couple of seconds after
-   backgrounding, then jumping back to 0:00, repeating forever. Most likely
-   explanation: iOS pauses the embedded cross-origin iframe some time after
-   backgrounding, and calling playVideo() on it again at that point doesn't
-   cleanly resume — it can effectively reinitialize the embed, restarting
-   the current cue from 0, which then gets paused again shortly after,
-   repeating indefinitely. Fighting the OS's own pause this way was actively
-   worse than not fighting it at all. Now this only keeps our own state (the
-   play/pause icon, isPlaying) honest with reality — if the OS silently
-   paused us, the UI correctly shows "paused" instead of staying stuck
-   showing "playing" while nothing is actually audible — and leaves
-   resuming to an explicit user action (tapping play, or a lock-screen/
-   MediaSession control), never an automatic one. */
-function tryResumeIfNeeded() {
-  if (!player.isPlaying || !player.ytReady) return;
-  ensureKeepAliveAudioPlaying();
-  let state;
-  try { state = player.ytPlayer.getPlayerState(); } catch (e) { return; }
-  if (state === YT.PlayerState.PAUSED && player.isPlaying) {
-    player.isPlaying = false;
-    updatePlayerUI();
-  }
-}
-function setupBackgroundAudioResilience() {
-  document.addEventListener('visibilitychange', tryResumeIfNeeded);
-  window.addEventListener('pageshow', tryResumeIfNeeded);
-  window.addEventListener('focus', tryResumeIfNeeded);
-  document.addEventListener('resume', tryResumeIfNeeded, false);
-}
-
-// The real audio always comes from the YouTube iframe — this silent local
-// <audio> loop is only a "keep-alive" anchor. On iOS specifically, a
-// cross-origin iframe's audio doesn't reliably register the top-level page
-// itself as "actively playing audio", which is what iOS's WebKit uses to
-// decide how much background execution time (JS timers, network, etc.) a
-// backgrounded tab/PWA still gets. A real, local <audio> element playing
-// (even silence) in the TOP-LEVEL document anchors that classification
-// directly, independent of whatever the nested iframe is doing — this is a
-// known, legitimate technique (no YouTube content is extracted or
-// bypassed) used by several web audio apps for exactly this reason. Never
-// given its own MediaSession metadata, so it never competes with the real
-// track's lock-screen info.
-function ensureKeepAliveAudioPlaying() {
-  const el = $('#silentKeepAlive');
-  if (el && el.paused) el.play().catch(() => {});
+    // playbackRate must reflect real play/pause state, never a hardcoded 1
+    // — the OS extrapolates the lock-screen scrubber forward at this rate
+    // between calls.
+    navigator.mediaSession.setPositionState({ duration, playbackRate: player.isPlaying ? 1 : 0, position });
+  } catch (e) { /* transient invalid state, e.g. mid src-swap — next event will retry */ }
 }
 
 /* =========================================================
@@ -1511,6 +1428,10 @@ function setupSeekBar() {
   }
 
   track.addEventListener('pointerdown', (e) => {
+    // Not seekable until the background blob-upgrade finishes (see
+    // upgradeToSeekableBlob) — the streamed source has no known duration/
+    // Range support, so a drag here couldn't land anywhere meaningful yet.
+    if (!isFinite(audioEl.duration)) return;
     dragging = true;
     dragPointerId = e.pointerId;
     rectAtDragStart = track.getBoundingClientRect();
@@ -1526,62 +1447,33 @@ function setupSeekBar() {
     if (!dragging || e.pointerId !== dragPointerId) return;
     dragging = false;
     track.classList.remove('seeking');
-    const pct = pctFromEvent(e);
-    if (player.ytReady && player.duration > 0) {
-      const seekPos = player.duration * pct;
-      try { player.ytPlayer.seekTo(seekPos, true); } catch (e2) { /* the fill/handle position already visually committed above */ }
-      // force the known target position rather than reading getCurrentTime()
-      // right after seekTo() — that read can still echo the pre-seek value
-      // since seekTo() resolves asynchronously over the postMessage bridge
-      setPositionState(seekPos);
+    if (isFinite(audioEl.duration)) {
+      audioEl.currentTime = audioEl.duration * pctFromEvent(e); // 'seeked' listener pushes the resulting position state
     }
   }
   track.addEventListener('pointerup', commitSeek);
   track.addEventListener('pointercancel', () => { dragging = false; track.classList.remove('seeking'); });
   track.addEventListener('lostpointercapture', () => { dragging = false; track.classList.remove('seeking'); });
 
-  // registered with the single shared ticker (see setupPlaybackTicker) instead
-  // of running its own setInterval — several independent timers each doing
-  // DOM writes were competing for main-thread time on lower-end phones and
-  // showed up as generally janky animations, not just a slow progress bar.
-  seekBarTickFn = () => {
-    if (dragging || !player.ytReady || !currentTrack()) return;
-    const duration = player.ytPlayer.getDuration();
-    const pos = player.ytPlayer.getCurrentTime();
-    if (duration > 0) {
+  // Driven by the audio element's own native 'timeupdate' event instead of
+  // a manual setInterval poll — real, browser-paced progress ticks, not an
+  // inferred/polled approximation, so there's no drift-vs-OS-interpolation
+  // gap left to produce the old lock-screen sawtooth class of bug.
+  audioEl.addEventListener('timeupdate', () => {
+    if (dragging || !currentTrack()) return;
+    const duration = audioEl.duration;
+    const pos = audioEl.currentTime;
+    $('#fpTimeCurrent').textContent = formatTime(pos);
+    if (isFinite(duration) && duration > 0) {
       setFillPct(pos / duration);
-      $('#fpTimeCurrent').textContent = formatTime(pos);
       $('#fpTimeRemaining').textContent = '-' + formatTime(duration - pos);
       $('#miniProgressFill').style.width = (pos / duration * 100) + '%';
+    } else {
+      // Duration not known yet (still on the streamed pre-upgrade source) —
+      // show elapsed time honestly rather than a misleading "0:00 left".
+      $('#fpTimeRemaining').textContent = '--:--';
     }
-  };
-}
-
-// Back to a single 500ms tick (a 250ms variant was tried and reverted: it
-// doubled how often getCurrentTime()/getDuration() cross the YouTube
-// iframe's postMessage bridge per second for a marginal visual gain, and
-// was a plausible contributor to real-device animation lag reported in
-// the full player). The CSS transition on .fp-seek-fill/.fp-seek-handle
-// (0.5s linear, matching this interval) already does the actual smoothing
-// between polls, so the extra polling frequency wasn't buying much.
-let seekBarTickFn = null;
-function setupPlaybackTicker() {
-  let tickCount = 0;
-  setInterval(() => {
-    tickCount++;
-    tryResumeIfNeeded();
-    // setPositionState() now also fires immediately on every real state
-    // change (updatePlayerUI, seeks) — the OS interpolates smoothly on its
-    // own in between, so this periodic call is only a slow drift-correcting
-    // safety net (every 10th tick = 5s), not a per-tick call. Calling it
-    // every 500ms was the actual cause of the reported "advances then jumps
-    // back a few seconds, repeatedly" lock-screen glitch: each call re-
-    // anchored position from a getCurrentTime() sample that lags slightly
-    // behind real elapsed time, and the OS's own interpolation had already
-    // run past it by the next 500ms tick — a continuous, visible sawtooth.
-    if (tickCount % 10 === 0) setPositionState();
-    if (seekBarTickFn) seekBarTickFn();
-  }, 500);
+  });
 }
 
 /* =========================================================
@@ -1863,8 +1755,7 @@ function boot() {
   setupVoiceSearch();
   setupLibraryHeader();
   setupPlayerControls();
-  setupBackgroundAudioResilience();
-  setupPlaybackTicker();
+  setupAudioEngine();
   setupMiniPlayerElevationObserver();
   goTo('home');
 

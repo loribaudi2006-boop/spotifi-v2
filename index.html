@@ -162,22 +162,18 @@
     </div>
   </div>
 
-  <!-- hidden real youtube player, positioned over whichever cover is active -->
-  <div id="ytPlayerWrap" class="yt-player-wrap">
-    <div id="ytplayer"></div>
-  </div>
-
-  <!-- Silent local keep-alive anchor — see setupBackgroundAudioResilience()
-       in app.js for why this exists. Not shown to the user, never given its
-       own MediaSession metadata; the real audio is still the YouTube iframe. -->
-  <audio id="silentKeepAlive" src="silence.wav" loop playsinline preload="auto"></audio>
+  <!-- The real playback engine: a top-level <audio> element streaming a
+       direct audio URL resolved via our own stream-proxy worker. Being a
+       real, top-level element (not a cross-origin iframe) is what makes
+       background/lock-screen playback and MediaSession actually reliable —
+       see app.js. -->
+  <audio id="audioEl" playsinline preload="auto"></audio>
 
   <div id="modalRoot"></div>
   <div id="toastRoot"></div>
 
 </div>
 
-<script src="https://www.youtube.com/iframe_api"></script>
 <script src="app.js"></script>
 </body>
 </html>

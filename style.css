@@ -746,23 +746,6 @@ body.has-now-playing .modal-overlay .modal {
 .fp-lyrics-head { display: flex; align-items: center; justify-content: space-between; font-weight: 700; margin-bottom: 12px; }
 .fp-lyrics-body { flex: 1; overflow-y: auto; font-size: 16px; line-height: 1.9; color: var(--text-secondary); white-space: pre-line; }
 
-/* Audio-only playback engine: a real YouTube iframe is required to produce
-   sound, but no video is ever shown to the user (only the static cover art
-   elsewhere in the UI). Kept genuinely on-screen (not translated to a
-   -9999px offset) at a real, non-zero size, just visually suppressed via
-   opacity + a negative z-index — some mobile browsers treat off-viewport
-   iframes as "not visible" and refuse to autoplay/keep them playing. */
-.yt-player-wrap {
-  position: fixed;
-  z-index: -1;
-  bottom: 0; left: 0;
-  width: 160px; height: 90px;
-  overflow: hidden;
-  opacity: 0.01;
-  pointer-events: none;
-}
-#ytplayer, #ytplayer iframe { width: 100%; height: 100%; }
-
 /* ===== Modals ===== */
 .modal-overlay {
   position: fixed; inset: 0;
