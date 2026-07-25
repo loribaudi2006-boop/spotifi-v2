@@ -1170,7 +1170,26 @@ let suppressNextAudioError = false;
 // listener below) at one attempt, so a genuinely broken track can't loop.
 let awaitingErrorRetry = false;
 
+// Real failure mode found live (2026-07-25): the resolve step depends on a
+// single shared third-party service — when IT is briefly unavailable (rate
+// limited, momentarily down), EVERY track fails, not just one. The old
+// skip-to-next-on-failure behavior (inherited from the YouTube-iframe era,
+// where a failure genuinely meant "this one video is broken") turned that
+// into a runaway cascade: each failed track immediately tried the next,
+// which failed just as fast, blowing through the whole queue in seconds —
+// and each of those skips was itself another request against the very
+// rate limit causing the problem, actively delaying its own recovery.
+// Capped here: after 2 failures in a row, stop and say so plainly instead
+// of continuing to burn through the queue.
+let consecutiveFailures = 0;
 function handlePlaybackFailure() {
+  consecutiveFailures++;
+  if (consecutiveFailures >= 2) {
+    showToast('Servizio di riproduzione non disponibile al momento, riprova tra poco');
+    player.isPlaying = false;
+    updatePlayerUI();
+    return;
+  }
   showToast('Brano non disponibile, passo al successivo');
   const next = getNextIndex();
   if (next !== null) playIndex(next);
@@ -1241,6 +1260,7 @@ function setBuffering(isBuffering) {
 
 function setupAudioEngine() {
   audioEl.addEventListener('play', () => {
+    consecutiveFailures = 0; // real audio is flowing — the failure streak, if any, is over
     if (!player.isPlaying) { player.isPlaying = true; updatePlayerUI(); }
   });
   audioEl.addEventListener('pause', () => {
