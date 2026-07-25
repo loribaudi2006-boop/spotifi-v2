@@ -671,6 +671,12 @@ body.has-now-playing .modal-overlay .modal {
 .mini-player.buffering .mp-cover,
 .full-player.buffering .fp-cover { animation: bufferPulse 1s ease-in-out infinite; }
 
+/* The play/pause button itself swaps to ICONS.spinner while buffering (see
+   updatePlayerUI in app.js) — this keyframe just spins whatever icon
+   carries the .icon-spin class. */
+@keyframes iconSpin { to { transform: rotate(360deg); } }
+.icon-spin { animation: iconSpin 0.8s linear infinite; transform-origin: center; }
+
 .fp-info { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; }
 .fp-titles { min-width: 0; }
 .fp-title { font-size: 20px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

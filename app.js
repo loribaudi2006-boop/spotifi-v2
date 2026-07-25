@@ -25,6 +25,7 @@ const ICONS = {
   list: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>`,
   play: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg>`,
   retry: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 1 2.6 6.3"/><path d="M3 21v-5h5"/></svg>`,
+  spinner: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" class="icon-spin"><path d="M12 3a9 9 0 1 1-6.36 2.64"/></svg>`,
   pause: `<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>`,
   prev: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6z"/><path d="M20 5 8 12l12 7z"/></svg>`,
   next: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2z"/><path d="M4 5l12 7-12 7z"/></svg>`,
@@ -389,7 +390,10 @@ function renderSearch() {
       <span class="cat-tile-note ic" style="color:rgba(255,255,255,.55)">${ICONS[c.icon]}</span>
     </button>`).join('');
   $$('#catGrid .cat-tile').forEach((tile) => {
-    tile.addEventListener('click', () => runSearch(tile.dataset.cat));
+    tile.addEventListener('click', () => {
+      $('#searchInput').value = tile.dataset.cat; // reflect the chosen category in the box
+      runSearch(tile.dataset.cat);
+    });
   });
   applyStagger(el);
 }
@@ -408,7 +412,15 @@ function setupSearchInput() {
 }
 
 async function runSearch(query) {
-  $('#searchInput').value = query;
+  // Deliberately does NOT write query back into #searchInput — it used to,
+  // unconditionally, which was a real bug: the debounced call below passes
+  // input.value.trim() straight from what the user is actively typing, and
+  // writing that trimmed value back into the input a moment later would
+  // silently delete a trailing space the user had already typed while
+  // pausing before the next word, corrupting "hello world" into
+  // "helloworld" as they kept going. Callers that genuinely need the box
+  // to reflect a programmatically-chosen query (category tile, voice
+  // search) set #searchInput.value themselves before calling this.
   $('#catGrid').classList.add('hidden');
   const results = $('#searchResults');
   results.innerHTML = `<div class="empty-state">Ricerca in corso...</div>`;
@@ -506,6 +518,7 @@ function setupVoiceSearch() {
   recognition.addEventListener('end', () => { listening = false; $('#voiceWave').classList.add('hidden'); });
   recognition.addEventListener('result', (e) => {
     const text = e.results[0][0].transcript;
+    $('#searchInput').value = text; // reflect the transcribed query in the box
     runSearch(text);
   });
   recognition.addEventListener('error', () => { showToast('Non ho capito, riprova'); });
@@ -1269,9 +1282,12 @@ async function upgradeToSeekableBlob(streamUrl, myToken) {
 // mini-player already appears instantly on tap (see playIndex), but with no
 // visual difference between "loading" and "silently doing nothing" a
 // multi-second resolve could easily read as broken rather than working.
-function setBuffering(isBuffering) {
-  $('#miniPlayer').classList.toggle('buffering', isBuffering);
-  $('#fullPlayer').classList.toggle('buffering', isBuffering);
+let isBuffering = false;
+function setBuffering(buffering) {
+  isBuffering = buffering;
+  $('#miniPlayer').classList.toggle('buffering', buffering);
+  $('#fullPlayer').classList.toggle('buffering', buffering);
+  updatePlayerUI();
 }
 
 function setupAudioEngine() {
@@ -1404,13 +1420,13 @@ function updatePlayerUI() {
   // track-change transition, so the lock screen reflects reality right
   // away instead of waiting for the ticker's slow safety-net resync below
   setPositionState();
-  const playIcon = playbackNeedsRetry ? ICONS.retry : (player.isPlaying ? ICONS.pause : ICONS.play);
+  const playIcon = isBuffering ? ICONS.spinner : playbackNeedsRetry ? ICONS.retry : (player.isPlaying ? ICONS.pause : ICONS.play);
   $('#miniTitle').textContent = t.title;
   $('#miniArtist').textContent = t.artist;
   $('#miniCover').innerHTML = `<img src="${t.thumb}" alt="" />`;
   setIcon($('#miniLikeBtn'), ICONS.heart(isLiked(t.id)));
   setIcon($('#miniPlayBtn'), playIcon);
-  $('#miniPlayBtn').setAttribute('aria-label', playbackNeedsRetry ? 'Riprova' : (player.isPlaying ? 'Pausa' : 'Play'));
+  $('#miniPlayBtn').setAttribute('aria-label', isBuffering ? 'Caricamento' : playbackNeedsRetry ? 'Riprova' : (player.isPlaying ? 'Pausa' : 'Play'));
 
   $('#fpTitle').textContent = t.title;
   $('#fpArtist').textContent = t.artist;
@@ -1419,7 +1435,7 @@ function updatePlayerUI() {
   setIcon($('#fpLikeBtn'), ICONS.heart(isLiked(t.id)));
   $('#fpLikeBtn').classList.toggle('liked', isLiked(t.id));
   setIcon($('#fpPlayBtn'), playIcon);
-  $('#fpPlayBtn').setAttribute('aria-label', playbackNeedsRetry ? 'Riprova' : (player.isPlaying ? 'Pausa' : 'Play'));
+  $('#fpPlayBtn').setAttribute('aria-label', isBuffering ? 'Caricamento' : playbackNeedsRetry ? 'Riprova' : (player.isPlaying ? 'Pausa' : 'Play'));
   refreshNowPlayingHighlight();
 }
 
