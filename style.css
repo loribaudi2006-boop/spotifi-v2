@@ -664,6 +664,13 @@ body.has-now-playing .modal-overlay .modal {
 }
 .fp-cover img { width: 100%; height: 100%; object-fit: cover; }
 
+/* Shown while a track's stream URL is being resolved (a real few-second
+   third-party network step, see startPlaybackFor in app.js) — without this
+   there's no visual difference between "loading" and "silently broken". */
+@keyframes bufferPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+.mini-player.buffering .mp-cover,
+.full-player.buffering .fp-cover { animation: bufferPulse 1s ease-in-out infinite; }
+
 .fp-info { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; }
 .fp-titles { min-width: 0; }
 .fp-title { font-size: 20px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

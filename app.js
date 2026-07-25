@@ -1120,6 +1120,38 @@ async function resolveStreamUrl(videoId) {
   } catch (e) { return null; }
 }
 
+// Resolving a stream URL is the slow, third-party-dependent step (cobalt
+// itself takes a few real seconds to extract from YouTube — not something
+// this app can speed up). For the common case of letting the queue play
+// through normally, that latency can be hidden entirely by resolving the
+// NEXT track ahead of time while the current one is still playing, so by
+// the time it's actually needed the answer is already sitting here.
+let prefetch = null; // { trackId, url, resolvedAt } | { trackId, promise }
+function schedulePrefetchNext() {
+  if (player.repeatMode === 'one' || player.queue.length <= 1) return;
+  const nextIdx = getNextIndex();
+  if (nextIdx === null) return;
+  const nextTrack = player.queue[nextIdx];
+  if (prefetch && prefetch.trackId === nextTrack.id) return; // already have it / already fetching it
+  const entry = { trackId: nextTrack.id, promise: null, url: null, resolvedAt: 0 };
+  entry.promise = resolveStreamUrl(nextTrack.id).then((url) => {
+    if (prefetch === entry) { entry.url = url; entry.resolvedAt = Date.now(); }
+  });
+  prefetch = entry;
+}
+// Consumes the prefetched URL for `track` if it's there and still fresh —
+// the resolved tunnel URL expires in well under two minutes, so anything
+// older than this is treated as a miss rather than risking a dead link.
+const PREFETCH_MAX_AGE_MS = 60000;
+async function takePrefetchedStreamUrl(track) {
+  if (!prefetch || prefetch.trackId !== track.id) return null;
+  const entry = prefetch;
+  prefetch = null;
+  await entry.promise;
+  if (!entry.url || Date.now() - entry.resolvedAt > PREFETCH_MAX_AGE_MS) return null;
+  return entry.url;
+}
+
 // Bumped every time a new track is picked — lets an in-flight resolve/blob
 // fetch for a PREVIOUS track detect it's been superseded and bail out
 // instead of clobbering whatever's playing now.
@@ -1159,15 +1191,22 @@ async function startPlaybackFor(track, isRetry) {
   suppressNextAudioError = true;
   audioEl.removeAttribute('src');
   audioEl.load();
+  setBuffering(true);
 
-  const streamUrl = await resolveStreamUrl(track.id);
+  // A prefetched URL (queued up while the previous track was playing, see
+  // schedulePrefetchNext) skips the slow resolve step entirely — this is
+  // what makes playing straight through a queue feel instant despite
+  // cobalt's own extraction taking a few real seconds per track.
+  const streamUrl = (await takePrefetchedStreamUrl(track)) || (await resolveStreamUrl(track.id));
   if (myToken !== playbackToken) return; // a different track was picked meanwhile
-  if (!streamUrl) { handlePlaybackFailure(); return; }
+  if (!streamUrl) { setBuffering(false); handlePlaybackFailure(); return; }
 
   suppressNextAudioError = false;
   audioEl.src = streamUrl;
   try { await audioEl.play(); } catch (e) { /* 'pause'/'error' listeners reflect whatever actually happened */ }
+  setBuffering(false);
   upgradeToSeekableBlob(streamUrl, myToken);
+  schedulePrefetchNext();
 }
 
 async function upgradeToSeekableBlob(streamUrl, myToken) {
@@ -1189,6 +1228,15 @@ async function upgradeToSeekableBlob(streamUrl, myToken) {
   audioEl.currentTime = pos;
   suppressNextAudioError = false;
   if (wasPlaying) { try { await audioEl.play(); } catch (e) { /* ignore */ } }
+}
+
+// Honest "still loading" feedback while resolveStreamUrl is in flight — the
+// mini-player already appears instantly on tap (see playIndex), but with no
+// visual difference between "loading" and "silently doing nothing" a
+// multi-second resolve could easily read as broken rather than working.
+function setBuffering(isBuffering) {
+  $('#miniPlayer').classList.toggle('buffering', isBuffering);
+  $('#fullPlayer').classList.toggle('buffering', isBuffering);
 }
 
 function setupAudioEngine() {
