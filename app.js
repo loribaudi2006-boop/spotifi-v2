@@ -1225,7 +1225,8 @@ async function startPlaybackFor(track, isRetry) {
   try { await audioEl.play(); } catch (e) { /* 'pause'/'error' listeners reflect whatever actually happened */ }
   setBuffering(false);
   upgradeToSeekableBlob(streamUrl, myToken);
-  schedulePrefetchNext();
+  // NOT scheduled here — see the 'timeupdate' listener in setupAudioEngine,
+  // which fires this once the track is actually nearing its end instead.
 }
 
 async function upgradeToSeekableBlob(streamUrl, myToken) {
@@ -1262,6 +1263,21 @@ function setupAudioEngine() {
   audioEl.addEventListener('play', () => {
     consecutiveFailures = 0; // real audio is flowing — the failure streak, if any, is over
     if (!player.isPlaying) { player.isPlaying = true; updatePlayerUI(); }
+  });
+  // Prefetching too early (e.g. right when the CURRENT track starts) was a
+  // real, self-inflicted bug: the resolved tunnel URL is only valid ~90s,
+  // so for any normal-length song the prefetch had always gone stale
+  // (discarded by takePrefetchedStreamUrl's freshness check) long before
+  // the next track actually needed it — meaning every track was silently
+  // paying for a wasted extra resolve request AND still doing a full fresh
+  // one when actually needed, roughly doubling real load on the shared
+  // resolve service for no benefit. Triggering it once the track is
+  // actually nearing its end keeps the prefetch's age at time-of-use well
+  // under the tunnel's validity window, so it's usually still fresh AND
+  // there's no wasted duplicate request.
+  audioEl.addEventListener('timeupdate', () => {
+    const d = audioEl.duration;
+    if (isFinite(d) && d - audioEl.currentTime <= 45) schedulePrefetchNext();
   });
   audioEl.addEventListener('pause', () => {
     // Fires for every real pause: a user tap, a MediaSession pause, iOS
