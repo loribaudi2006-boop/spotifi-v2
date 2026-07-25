@@ -24,6 +24,7 @@ const ICONS = {
   grid: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg>`,
   list: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>`,
   play: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg>`,
+  retry: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 1 2.6 6.3"/><path d="M3 21v-5h5"/></svg>`,
   pause: `<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>`,
   prev: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6z"/><path d="M20 5 8 12l12 7z"/></svg>`,
   next: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2z"/><path d="M4 5l12 7-12 7z"/></svg>`,
@@ -1182,10 +1183,17 @@ let awaitingErrorRetry = false;
 // Capped here: after 2 failures in a row, stop and say so plainly instead
 // of continuing to burn through the queue.
 let consecutiveFailures = 0;
+// True once the failure cap below has stopped playback — turns the
+// play/pause button into an explicit "riprova" (retry) action instead of
+// leaving the user with only a toast that's already gone by the time they
+// notice something's wrong. Cleared the moment a fresh attempt starts (see
+// startPlaybackFor) or real audio actually plays.
+let playbackNeedsRetry = false;
 function handlePlaybackFailure() {
   consecutiveFailures++;
   if (consecutiveFailures >= 2) {
-    showToast('Servizio di riproduzione non disponibile al momento, riprova tra poco');
+    playbackNeedsRetry = true;
+    showToast('Servizio non disponibile al momento — tocca play per riprovare');
     player.isPlaying = false;
     updatePlayerUI();
     return;
@@ -1206,6 +1214,13 @@ function handlePlaybackFailure() {
 async function startPlaybackFor(track, isRetry) {
   const myToken = ++playbackToken;
   awaitingErrorRetry = isRetry === true;
+  playbackNeedsRetry = false; // a fresh attempt is underway, whatever triggered it
+  // NOT resetting consecutiveFailures here — this function is also called
+  // by handlePlaybackFailure's own auto-skip-to-next path, and resetting it
+  // on every call would mean the failure count could never reach the cap,
+  // reopening the exact runaway-cascade bug this was built to prevent. It's
+  // only ever reset by a genuine success ('play' event) or an explicit
+  // manual retry (see togglePlayPause).
   releaseCurrentBlobUrl();
   suppressNextAudioError = true;
   audioEl.removeAttribute('src');
@@ -1353,7 +1368,9 @@ function getPrevIndex() {
 }
 
 function togglePlayPause() {
-  if (!currentTrack()) return;
+  const t = currentTrack();
+  if (!t) return;
+  if (playbackNeedsRetry) { startPlaybackFor(t); return; } // the button IS the retry action in this state — see handlePlaybackFailure
   // No optimistic flip needed — audioEl's own 'play'/'pause' events (see
   // setupAudioEngine) are real, near-synchronous browser events, not an
   // async postMessage round-trip, so they're fast enough to drive the UI
@@ -1387,11 +1404,13 @@ function updatePlayerUI() {
   // track-change transition, so the lock screen reflects reality right
   // away instead of waiting for the ticker's slow safety-net resync below
   setPositionState();
+  const playIcon = playbackNeedsRetry ? ICONS.retry : (player.isPlaying ? ICONS.pause : ICONS.play);
   $('#miniTitle').textContent = t.title;
   $('#miniArtist').textContent = t.artist;
   $('#miniCover').innerHTML = `<img src="${t.thumb}" alt="" />`;
   setIcon($('#miniLikeBtn'), ICONS.heart(isLiked(t.id)));
-  setIcon($('#miniPlayBtn'), player.isPlaying ? ICONS.pause : ICONS.play);
+  setIcon($('#miniPlayBtn'), playIcon);
+  $('#miniPlayBtn').setAttribute('aria-label', playbackNeedsRetry ? 'Riprova' : (player.isPlaying ? 'Pausa' : 'Play'));
 
   $('#fpTitle').textContent = t.title;
   $('#fpArtist').textContent = t.artist;
@@ -1399,7 +1418,8 @@ function updatePlayerUI() {
   $('#fpBg').style.backgroundImage = `url(${t.thumb})`;
   setIcon($('#fpLikeBtn'), ICONS.heart(isLiked(t.id)));
   $('#fpLikeBtn').classList.toggle('liked', isLiked(t.id));
-  setIcon($('#fpPlayBtn'), player.isPlaying ? ICONS.pause : ICONS.play);
+  setIcon($('#fpPlayBtn'), playIcon);
+  $('#fpPlayBtn').setAttribute('aria-label', playbackNeedsRetry ? 'Riprova' : (player.isPlaying ? 'Pausa' : 'Play'));
   refreshNowPlayingHighlight();
 }
 
@@ -1456,7 +1476,7 @@ function updateMediaSession() {
   // explicit direction, never a blind toggle — a lock-screen "pause" tap
   // must always pause even if our internal isPlaying had drifted from
   // reality, otherwise it can appear to do nothing or do the opposite
-  navigator.mediaSession.setActionHandler('play', () => audioEl.play().catch(() => {}));
+  navigator.mediaSession.setActionHandler('play', () => togglePlayPause()); // routes through the retry check too, not just a raw resume
   navigator.mediaSession.setActionHandler('pause', () => audioEl.pause());
   navigator.mediaSession.setActionHandler('previoustrack', () => playPrev());
   navigator.mediaSession.setActionHandler('nexttrack', () => playNext());
