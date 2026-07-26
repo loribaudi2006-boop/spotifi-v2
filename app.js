@@ -1897,8 +1897,29 @@ function boot() {
   setupMiniPlayerElevationObserver();
   goTo('home');
 
+  // A newly-activated service worker (see sw.js's skipWaiting/clients.claim)
+  // now auto-reloads the page instead of silently taking control in the
+  // background — real users were force-closing/reinstalling the PWA after
+  // an update and still seeing stale UI because nothing ever told the
+  // already-open page a fresher version had taken over. registration.update()
+  // is called explicitly on every launch AND whenever the app is
+  // foregrounded (visibilitychange), since iOS Safari's own automatic SW
+  // update-check timing is not reliably prompt for standalone/home-screen
+  // PWAs — this makes the app actively ask, like a native app checking for
+  // updates on open, rather than passively waiting for the OS to notice.
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    let refreshedOnce = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (refreshedOnce) return;
+      refreshedOnce = true;
+      window.location.reload();
+    });
+    navigator.serviceWorker.register('sw.js').then((reg) => {
+      reg.update().catch(() => {});
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') reg.update().catch(() => {});
+      });
+    }).catch(() => {});
   }
 }
 document.addEventListener('DOMContentLoaded', boot);

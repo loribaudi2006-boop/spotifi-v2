@@ -1,4 +1,4 @@
-const CACHE_NAME = 'spotifi-shell-v26';
+const CACHE_NAME = 'spotifi-shell-v27';
 
 const APP_SHELL = [
   './',
@@ -26,6 +26,20 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// Network-first, cache as offline fallback only — NOT cache-first. This
+// used to be cache-first (serve cached copy immediately, never re-check
+// network once something was cached), which is exactly why real users kept
+// seeing stale UI after a redeploy even after force-closing/reinstalling
+// the PWA: once ANY version of index.html/app.js/style.css was cached, it
+// would keep being served forever regardless of how old it was, until the
+// service worker itself fully cycled through install/activate — and that
+// cycle depends on the browser noticing sw.js changed, which is exactly
+// the step that can lag on iOS Safari (SW update checks aren't always
+// prompt for standalone/home-screen-added PWAs, and GitHub Pages itself
+// serves everything with Cache-Control: max-age=600, which can shadow the
+// "fetch a truly fresh sw.js" step too). Network-first means every load,
+// online, always gets the actual current deploy — the cache only ever
+// matters when genuinely offline.
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
@@ -33,15 +47,12 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
 
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request).then((response) => {
-        if (response.ok && event.request.method === 'GET') {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-        }
-        return response;
-      });
-    }).catch(() => caches.match('./index.html'))
+    fetch(event.request).then((response) => {
+      if (response.ok && event.request.method === 'GET') {
+        const clone = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+      }
+      return response;
+    }).catch(() => caches.match(event.request).then((cached) => cached || caches.match('./index.html')))
   );
 });
