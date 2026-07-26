@@ -326,7 +326,6 @@ function wireCardCarousel(carousel, list) {
       if (idx >= 0) playQueue(list, idx);
     });
   });
-  setupParallax(carousel);
 }
 function wireArtistCarousel(carousel, list) {
   $$('.card', carousel).forEach((card) => {
@@ -336,21 +335,6 @@ function wireArtistCarousel(carousel, list) {
       if (idx >= 0) playQueue(list, idx);
     });
   });
-  setupParallax(carousel);
-}
-
-function setupParallax(carousel) {
-  let lastScroll = carousel.scrollLeft;
-  carousel.addEventListener('scroll', () => {
-    const delta = carousel.scrollLeft - lastScroll;
-    lastScroll = carousel.scrollLeft;
-    $$('.card-img-wrap img', carousel).forEach((img) => {
-      const current = parseFloat(img.dataset.parallax || '0') - delta * 0.15;
-      const clamped = Math.max(-8, Math.min(8, current));
-      img.dataset.parallax = clamped;
-      img.style.transform = `translateX(${clamped}px)`;
-    });
-  }, { passive: true });
 }
 
 // Only dynamically-loaded content (search results, recommendation carousels)
@@ -381,8 +365,10 @@ const CATEGORIES = [
 function renderSearch() {
   const el = $('#view-search');
   el.innerHTML = `
-    <div class="section-title" style="margin-top:4px">Esplora tutto</div>
-    <div class="cat-grid" id="catGrid"></div>
+    <div id="exploreSection">
+      <div class="section-title" style="margin-top:4px">Esplora tutto</div>
+      <div class="cat-grid" id="catGrid"></div>
+    </div>
     <div id="searchResults"></div>
   `;
   $('#catGrid').innerHTML = CATEGORIES.map((c, i) => `
@@ -407,7 +393,7 @@ function setupSearchInput() {
     clearTimeout(searchDebounce);
     hideSearchHistoryDropdown();
     const q = input.value.trim();
-    if (!q) { $('#searchResults').innerHTML = ''; $('#catGrid').classList.remove('hidden'); return; }
+    if (!q) { $('#searchResults').innerHTML = ''; $('#exploreSection').classList.remove('hidden'); return; }
     searchDebounce = setTimeout(() => runSearch(q), 400);
   });
 }
@@ -422,7 +408,7 @@ async function runSearch(query) {
   // "helloworld" as they kept going. Callers that genuinely need the box
   // to reflect a programmatically-chosen query (category tile, voice
   // search) set #searchInput.value themselves before calling this.
-  $('#catGrid').classList.add('hidden');
+  $('#exploreSection').classList.add('hidden');
   const results = $('#searchResults');
   results.innerHTML = `<div class="empty-state">Ricerca in corso...</div>`;
   const tracks = await ytSearch(query, 20);
@@ -1044,14 +1030,18 @@ function renderSearchHistoryDropdown() {
   });
 }
 function showSearchHistoryDropdown() {
-  if (!db.recentTracks.length) return; // nothing to show — leave the category grid as-is
+  if (!db.recentTracks.length) return; // nothing to show — leave the explore section as-is
   renderSearchHistoryDropdown();
   $('#searchHistoryDropdown').classList.remove('hidden');
-  $('#catGrid').classList.add('hidden');
+  // Hides the WHOLE explore section (title + grid) — a past version only
+  // hid #catGrid itself, leaving the "Esplora tutto" heading floating
+  // visible above/behind the dropdown overlay (real bug: the heading and
+  // the dropdown's own "Cronologia" heading ended up visually overlapping).
+  $('#exploreSection').classList.add('hidden');
 }
 function hideSearchHistoryDropdown() {
   $('#searchHistoryDropdown').classList.add('hidden');
-  if (!$('#searchInput').value.trim()) $('#catGrid').classList.remove('hidden');
+  if (!$('#searchInput').value.trim()) $('#exploreSection').classList.remove('hidden');
 }
 function setupSearchHistoryDropdown() {
   $('#searchInput').addEventListener('focus', showSearchHistoryDropdown);
@@ -1740,7 +1730,6 @@ function setupPlayerControls() {
   $('#fpShuffleBtn').addEventListener('click', toggleShuffle);
   $('#fpRepeatBtn').addEventListener('click', cycleRepeat);
   $('#fpLikeBtn').addEventListener('click', () => { const t = currentTrack(); if (t) toggleLike(t, $('#fpLikeBtn')); });
-  $('#fpQueueBtn').addEventListener('click', openQueueModal);
   $('#fpQueueBtn2').addEventListener('click', openQueueModal);
   $('#fpPlaylistBtn').addEventListener('click', () => { const t = currentTrack(); if (t) openAddToPlaylistModal(t); });
   $('#fpLyricsBtn').addEventListener('click', openLyricsPanel);
@@ -1754,7 +1743,6 @@ function setupPlayerControls() {
   });
 
   setIcon($('#fpCloseBtn'), ICONS.chevronDown);
-  setIcon($('#fpQueueBtn'), ICONS.queueList);
   setIcon($('#fpShuffleBtn'), ICONS.shuffle);
   setIcon($('#fpPrevBtn'), ICONS.prev);
   setIcon($('#fpNextBtn'), ICONS.next);

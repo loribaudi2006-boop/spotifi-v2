@@ -30,7 +30,7 @@
   --z-modal: 100;
   --z-toast: 200;
 
-  --mobile-nav-h: 52px;
+  --mobile-nav-h: 44px;
   --mini-player-h: 64px;
   --topbar-h: 52px;
 }
@@ -294,23 +294,27 @@ a { color: inherit; text-decoration: none; }
 
 /* Horizontal carousels */
 .home-carousel {
-  display: flex; gap: 14px;
+  display: flex; gap: 16px;
   overflow-x: auto; scroll-snap-type: x proximity;
   scrollbar-width: none; padding: 4px 2px 12px;
 }
 .home-carousel::-webkit-scrollbar { display: none; }
 
 .card {
-  flex-shrink: 0; width: 140px; scroll-snap-align: start;
+  flex-shrink: 0; width: 148px; scroll-snap-align: start;
   border-radius: var(--r-md);
-  background: var(--surface-1);
+  /* was --surface-1 (#181818), only one shade above the page background
+     (#121212) — cards barely read as distinct tiles against the page,
+     relying on a soft shadow alone for definition. --surface-2 gives real
+     contrast without needing a border. */
+  background: var(--surface-2);
   box-shadow: var(--shadow-rest);
   transition: transform 0.25s var(--ease-spring), box-shadow 0.25s var(--ease);
   opacity: 0; animation: popIn 0.4s var(--ease) forwards;
 }
 .card:active { transform: scale(0.96); }
-.card-img-wrap { width: 100%; aspect-ratio: 1; border-radius: var(--r-md) var(--r-md) 0 0; overflow: hidden; background: var(--surface-2); }
-.card-img-wrap img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s var(--ease); will-change: transform; }
+.card-img-wrap { width: 100%; aspect-ratio: 1; border-radius: var(--r-md) var(--r-md) 0 0; overflow: hidden; background: var(--surface-1); }
+.card-img-wrap img { width: 100%; height: 100%; object-fit: cover; }
 .card-body { padding: 10px; }
 .card-title {
   font-size: 14px; font-weight: 600;
@@ -456,8 +460,15 @@ a { color: inherit; text-decoration: none; }
    modal sheet once a track is loaded, so the elevated mini-player has
    empty space to sit in rather than floating on top of the sheet's own
    content (e.g. the last track row). */
+/* Real bug: this used to omit --mobile-nav-h entirely. The elevated
+   mini-player's actual on-screen position sits ABOVE the (visually hidden
+   but still occupying space) bottom nav — bottom: calc(--mobile-nav-h +
+   safe-area) — not flush with the screen edge, so reserving only
+   mini-player-h + safe-area undershot by a full nav-bar height, leaving the
+   mini-player's top ~20-30px overlapping real modal content instead of the
+   reserved empty padding. */
 body.has-now-playing .modal-overlay .modal {
-  padding-bottom: calc(env(safe-area-inset-bottom) + var(--mini-player-h) + 30px);
+  padding-bottom: calc(env(safe-area-inset-bottom) + var(--mobile-nav-h) + var(--mini-player-h) + 20px);
 }
 @keyframes slideUpFade {
   from { opacity: 0; transform: translateY(16px); }
@@ -529,16 +540,16 @@ body.has-now-playing .modal-overlay .modal {
   flex: 1;
   height: 100%;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 3px;
+  gap: 2px;
   color: var(--text-secondary);
   position: relative; z-index: 1;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
 .nav-item.active { color: var(--text-primary); }
-.nav-icon { width: 24px; height: 24px; }
+.nav-icon { width: 20px; height: 20px; }
 .nav-icon svg { width: 100%; height: 100%; }
-.nav-label { font-size: 10px; font-weight: 600; }
+.nav-label { font-size: 9px; font-weight: 600; }
 .nav-item:active .nav-icon { animation: navPop 0.3s var(--ease-spring); }
 @keyframes navPop {
   0% { transform: scale(1); }
@@ -585,7 +596,12 @@ body.has-now-playing .modal-overlay .modal {
   z-index: var(--z-fullplayer);
   background: var(--bg);
   display: flex; flex-direction: column;
-  padding: env(safe-area-inset-top) 20px calc(env(safe-area-inset-bottom) + 20px);
+  /* Bottom padding used to be safe-area + 20px, THEN .fp-bottom-row added
+     its own +8px on top — on a real notched phone (safe-area ~34px) that
+     stacked up to ~62px of empty space below the last row, reading as a
+     "gray band" that squeezed everything above it upward. Only one layer
+     should own the safe-area clearance; trimmed to a small fixed gap here. */
+  padding: env(safe-area-inset-top) 20px calc(env(safe-area-inset-bottom) + 6px);
   transform: translateY(0);
   animation: fpSlideUp 0.4s var(--ease-spring);
   /* promotes the whole panel (including the heavily-blurred .fp-bg child)
@@ -738,7 +754,7 @@ body.has-now-playing .modal-overlay .modal {
    on any real phone width, so there's nothing to scroll or fade at all. */
 .fp-bottom-row {
   display: flex; align-items: center; justify-content: space-around;
-  padding: 4px 0 8px;
+  padding: 4px 0;
 }
 .fp-bottom-row .pill-btn {
   width: 48px; height: 48px; padding: 0; border-radius: 50%;
