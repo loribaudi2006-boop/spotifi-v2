@@ -66,6 +66,7 @@ function loadDB() {
 function defaultDB() {
   return {
     apiKey: '',
+    audioBitrate: '64',
     liked: [],
     recentTracks: [],
     playlists: [],
@@ -939,9 +940,28 @@ function openSettingsModal() {
           <button type="button" class="icon-btn" id="settingsCloseBtn"><span class="ic">${ICONS.close}</span></button>
         </div>
         <div class="modal-body">
-          <div class="modal-hint">Serve una chiave YouTube Data API v3 per cercare e riprodurre brani. Creala su console.cloud.google.com e assicurati di abilitare "YouTube Data API v3" per quella chiave.</div>
+          <div class="settings-section-title">Chiave YouTube API</div>
+          <div class="modal-hint">
+            Serve per cercare e riprodurre brani: senza una chiave, l'app non può interrogare YouTube. È gratuita (fino a circa 100 ricerche al giorno) e resta salvata solo su questo dispositivo.
+            <ol class="modal-hint-steps">
+              <li>Vai su <strong>console.cloud.google.com</strong> e crea un progetto (gratuito).</li>
+              <li>In "API e servizi" → "Libreria", cerca e abilita <strong>"YouTube Data API v3"</strong>.</li>
+              <li>In "Credenziali", crea una <strong>Chiave API</strong> e incollala qui sotto.</li>
+            </ol>
+          </div>
           <input type="text" class="modal-field" id="apiKeyInput" placeholder="Chiave YouTube API" value="${escapeHtml(db.apiKey)}" />
           <button type="button" class="modal-btn" id="saveApiKeyBtn">Salva</button>
+
+          <div class="settings-section-title settings-section-title-spaced">Qualità audio</div>
+          <div class="modal-hint">Scegli tra avvio più rapido o qualità migliore. Puoi cambiarla quando vuoi: il brano in riproduzione non si interrompe, il nuovo valore si applica dal prossimo avvio.</div>
+          <div class="chip-row" id="qualityChips">
+            <button type="button" class="chip${db.audioBitrate === '64' ? ' active' : ''}" data-bitrate="64">64 kbps · Veloce</button>
+            <button type="button" class="chip${db.audioBitrate === '128' ? ' active' : ''}" data-bitrate="128">128 kbps · Qualità migliore</button>
+          </div>
+          <div class="modal-hint">
+            <strong>64 kbps</strong>: il brano parte in circa 2-4 secondi, qualità adatta ad ascolto occasionale/di sottofondo (non hi-fi).<br/>
+            <strong>128 kbps</strong>: qualità nettamente migliore, ma l'avvio richiede più tempo (circa 6-7 secondi) perché va scaricato più audio prima di poter partire.
+          </div>
         </div>
       </div>
     </div>`;
@@ -955,6 +975,15 @@ function openSettingsModal() {
     saveDB();
     close();
     showToast('Chiave API salvata');
+  });
+  $$('.chip', $('#qualityChips')).forEach((chip) => {
+    chip.addEventListener('click', () => {
+      $$('.chip', $('#qualityChips')).forEach((c) => c.classList.remove('active'));
+      chip.classList.add('active');
+      db.audioBitrate = chip.dataset.bitrate;
+      saveDB();
+      showToast(`Qualità audio: ${chip.dataset.bitrate} kbps`);
+    });
   });
 }
 
@@ -1127,7 +1156,8 @@ const audioEl = $('#audioEl');
 
 async function resolveStreamUrl(videoId) {
   try {
-    const res = await fetch(`${STREAM_PROXY_BASE}/streams/${videoId}`);
+    const bitrate = db.audioBitrate === '128' ? '128' : '64';
+    const res = await fetch(`${STREAM_PROXY_BASE}/streams/${videoId}?bitrate=${bitrate}`);
     if (!res.ok) return null;
     const data = await res.json();
     return (data && data.url) || null;
