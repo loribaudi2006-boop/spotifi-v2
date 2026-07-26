@@ -620,6 +620,24 @@ body.has-now-playing .modal-overlay .modal {
      renders in two separate stages */
   will-change: transform;
 }
+/* Fades the blurred backdrop down to a flat, neutral dark tone right where
+   the OS's own home-indicator area begins, instead of cutting off abruptly
+   into whatever hard boundary sits there. A real-device debug test (bright
+   magenta background) showed the backdrop genuinely does paint behind that
+   whole zone — the "gray band" complaint is a hard-edge CONTRAST problem
+   (a vivid colorful backdrop meeting a flat dark strip with no transition),
+   not a coverage gap. Same z-index as .fp-bg (0, painted after it in source
+   order since ::after is generated last) so it sits above the backdrop but
+   below all real controls (z-index:1). */
+.full-player::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: calc(env(safe-area-inset-bottom) + 24px);
+  background: linear-gradient(to bottom, transparent, var(--bg));
+  z-index: 0;
+  pointer-events: none;
+}
 .full-player.closing { animation: fpSlideDown 0.25s var(--ease) forwards; }
 @keyframes fpSlideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
 @keyframes fpSlideDown { to { transform: translateY(100%); } }
