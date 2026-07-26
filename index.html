@@ -130,30 +130,37 @@
       <button type="button" class="icon-btn fp-like-btn" id="fpLikeBtn" aria-label="Aggiungi ai preferiti"><span class="ic"></span></button>
     </div>
 
-    <div class="fp-scrubber">
-      <div class="fp-seek-track" id="fpSeekTrack">
-        <div class="fp-seek-fill" id="fpSeekFill"></div>
-        <div class="fp-seek-handle" id="fpSeekHandle"></div>
+    <!-- fp-deck groups the scrubber/transport/action-row into one visually
+         "owned" control shelf (its own subtle surface + top hairline) that
+         continues seamlessly into the safe-area strip at the very bottom,
+         so that zone reads as an intentional part of the deck rather than
+         leftover empty space — see the comment on .fp-deck in style.css. -->
+    <div class="fp-deck" id="fpDeck">
+      <div class="fp-scrubber">
+        <div class="fp-seek-track" id="fpSeekTrack">
+          <div class="fp-seek-fill" id="fpSeekFill"></div>
+          <div class="fp-seek-handle" id="fpSeekHandle"></div>
+        </div>
+        <div class="fp-time-row">
+          <span id="fpTimeCurrent">0:00</span>
+          <span id="fpTimeRemaining">0:00</span>
+        </div>
       </div>
-      <div class="fp-time-row">
-        <span id="fpTimeCurrent">0:00</span>
-        <span id="fpTimeRemaining">0:00</span>
+
+      <div class="fp-controls">
+        <button type="button" class="icon-btn fp-shuffle-btn" id="fpShuffleBtn" aria-label="Riproduzione casuale"><span class="ic"></span></button>
+        <button type="button" class="icon-btn fp-prev-btn" id="fpPrevBtn" aria-label="Precedente"><span class="ic"></span></button>
+        <button type="button" class="fp-play-btn" id="fpPlayBtn" aria-label="Play"><span class="ic"></span></button>
+        <button type="button" class="icon-btn fp-next-btn" id="fpNextBtn" aria-label="Successivo"><span class="ic"></span></button>
+        <button type="button" class="icon-btn fp-repeat-btn" id="fpRepeatBtn" aria-label="Ripeti"><span class="ic"></span></button>
       </div>
-    </div>
 
-    <div class="fp-controls">
-      <button type="button" class="icon-btn fp-shuffle-btn" id="fpShuffleBtn" aria-label="Riproduzione casuale"><span class="ic"></span></button>
-      <button type="button" class="icon-btn fp-prev-btn" id="fpPrevBtn" aria-label="Precedente"><span class="ic"></span></button>
-      <button type="button" class="fp-play-btn" id="fpPlayBtn" aria-label="Play"><span class="ic"></span></button>
-      <button type="button" class="icon-btn fp-next-btn" id="fpNextBtn" aria-label="Successivo"><span class="ic"></span></button>
-      <button type="button" class="icon-btn fp-repeat-btn" id="fpRepeatBtn" aria-label="Ripeti"><span class="ic"></span></button>
-    </div>
-
-    <div class="fp-bottom-row">
-      <button type="button" class="pill-btn" id="fpQueueBtn2" aria-label="Coda"><span class="ic"></span></button>
-      <button type="button" class="pill-btn" id="fpPlaylistBtn" aria-label="Aggiungi a playlist"><span class="ic"></span></button>
-      <button type="button" class="pill-btn" id="fpLyricsBtn" aria-label="Testo"><span class="ic"></span></button>
-      <button type="button" class="pill-btn" id="fpShareBtn" aria-label="Condividi"><span class="ic"></span></button>
+      <div class="fp-bottom-row">
+        <button type="button" class="pill-btn" id="fpQueueBtn2" aria-label="Coda"><span class="ic"></span></button>
+        <button type="button" class="pill-btn" id="fpPlaylistBtn" aria-label="Aggiungi a playlist"><span class="ic"></span></button>
+        <button type="button" class="pill-btn" id="fpLyricsBtn" aria-label="Testo"><span class="ic"></span></button>
+        <button type="button" class="pill-btn" id="fpShareBtn" aria-label="Condividi"><span class="ic"></span></button>
+      </div>
     </div>
 
     <div class="fp-lyrics-panel hidden" id="fpLyricsPanel">

@@ -5,21 +5,33 @@
   --surface-1: #181818;
   --surface-2: #282828;
   --accent: #1DB954;
+  /* Brighter sibling of --accent, used only for gradient endpoints (CTA
+     buttons, play-button glow) — never as a flat fill on its own, so every
+     existing flat use of --accent (chips, highlights, icons) is untouched. */
+  --accent-2: #1ED760;
   --text-primary: #FFFFFF;
   --text-secondary: #B3B3B3;
 
+  /* Low-opacity hairline used for card/row edge definition on a true-black
+     background — an alternative to a heavier shadow alone, cheap to render
+     and doesn't create the flat-color-seam issue documented below for
+     larger bars (a 1px translucent line reads as an intentional edge, not
+     a mismatched block of color). */
+  --border-soft: rgba(255, 255, 255, 0.07);
+
   --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 
-  --r-sm: 6px;
-  --r-md: 10px;
-  --r-lg: 16px;
-  --r-xl: 24px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 18px;
+  --r-xl: 26px;
 
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 
-  --shadow-rest: 0 2px 8px rgba(0, 0, 0, 0.35);
-  --shadow-lift: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-rest: 0 2px 10px rgba(0, 0, 0, 0.4);
+  --shadow-lift: 0 10px 28px rgba(0, 0, 0, 0.5);
+  --shadow-glow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 0 32px rgba(29, 185, 84, 0.22);
 
   /* z-index scale, defined once so layering never has to be guessed/patched later */
   --z-content: 1;
@@ -30,7 +42,12 @@
   --z-modal: 100;
   --z-toast: 200;
 
-  --mobile-nav-h: 38px;
+  /* Was 38px (a prior session's reactive shrink) — below either native
+     platform's own tab-bar convention (iOS ~49pt, Android 56dp), which is
+     the more likely real reason it read as cramped rather than "compact".
+     56px matches that convention while the bar's actual *content* (icon +
+     label) is unchanged, so there's simply more breathing room around it. */
+  --mobile-nav-h: 56px;
   --mini-player-h: 64px;
   --topbar-h: 52px;
 }
@@ -44,6 +61,15 @@ html, body {
   height: 100%;
   overflow-x: hidden;
   -webkit-tap-highlight-color: transparent;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+  /* Kills the rubber-band/bounce-scroll + pull-to-refresh gesture at the
+     page edges — on a real phone that bounce is the single strongest "this
+     is a browser tab" tell; a real app's own scroll views clip at their
+     bounds instead. Purely a feel change, no scroll behavior any view
+     actually depends on is altered. */
+  overscroll-behavior-y: none;
 }
 
 button, input { font-family: inherit; color: inherit; }
@@ -185,7 +211,11 @@ a { color: inherit; text-decoration: none; }
 }
 .search-bar input {
   flex: 1; background: none; border: none; outline: none;
-  font-size: 15px; color: var(--text-primary);
+  /* 16px, not 15px: iOS Safari auto-zooms the whole page on focus for any
+     text input under 16px, regardless of the viewport meta tag — a real,
+     jarring "this is a webpage" moment the previous size was silently
+     triggering. */
+  font-size: 16px; color: var(--text-primary);
 }
 .search-bar input::placeholder { color: var(--text-secondary); }
 .search-ic { color: var(--text-secondary); }
@@ -254,13 +284,14 @@ a { color: inherit; text-decoration: none; }
   transition: background 0.15s var(--ease), transform 0.1s var(--ease);
 }
 .chip:active { transform: scale(0.95); }
-.chip.active { background: var(--accent); color: #04120a; }
+.chip.active { background: linear-gradient(135deg, var(--accent-2), var(--accent)); color: #04120a; }
 
 /* ===== Main views ===== */
 #views {
   position: relative;
   z-index: var(--z-content);
   padding-bottom: calc(var(--mobile-nav-h) + var(--mini-player-h) + 24px);
+  overscroll-behavior-y: contain;
 }
 .view { padding: 8px 16px 16px; }
 
@@ -281,7 +312,7 @@ a { color: inherit; text-decoration: none; }
   border-radius: var(--r-md);
   overflow: hidden;
   height: 56px;
-  box-shadow: var(--shadow-rest);
+  box-shadow: var(--shadow-rest), inset 0 0 0 1px var(--border-soft);
   transition: transform 0.2s var(--ease-spring), box-shadow 0.2s var(--ease);
 }
 .quick-tile:active { transform: scale(0.97); }
@@ -308,7 +339,7 @@ a { color: inherit; text-decoration: none; }
      relying on a soft shadow alone for definition. --surface-2 gives real
      contrast without needing a border. */
   background: var(--surface-2);
-  box-shadow: var(--shadow-rest);
+  box-shadow: var(--shadow-rest), inset 0 0 0 1px var(--border-soft);
   transition: transform 0.25s var(--ease-spring), box-shadow 0.25s var(--ease);
   opacity: 0; animation: popIn 0.4s var(--ease) forwards;
 }
@@ -345,7 +376,7 @@ a { color: inherit; text-decoration: none; }
   border-radius: var(--r-md);
   overflow: hidden;
   display: flex; align-items: flex-start; padding: 12px;
-  box-shadow: var(--shadow-rest);
+  box-shadow: var(--shadow-rest), inset 0 0 0 1px var(--border-soft);
   transition: transform 0.2s var(--ease-spring);
   opacity: 0; animation: popIn 0.4s var(--ease) forwards;
 }
@@ -441,7 +472,7 @@ a { color: inherit; text-decoration: none; }
   z-index: var(--z-miniplayer);
   background: var(--surface-2);
   border-radius: var(--r-md) var(--r-md) 0 0;
-  box-shadow: var(--shadow-lift);
+  box-shadow: var(--shadow-lift), inset 0 1px 0 rgba(255, 255, 255, 0.08);
   overflow: hidden;
   animation: slideUpFade 0.3s var(--ease);
 }
@@ -540,16 +571,40 @@ body.has-now-playing .modal-overlay .modal {
   flex: 1;
   height: 100%;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 2px;
+  gap: 4px;
   color: var(--text-secondary);
   position: relative; z-index: 1;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
 .nav-item.active { color: var(--text-primary); }
-.nav-icon { width: 18px; height: 18px; }
+/* Material-style "active indicator" pill behind the icon only (not the
+   label), matching the native Android/iOS tab-bar convention instead of a
+   plain color swap. z-index:-1 (not 0) so it paints behind the icon/label
+   spans despite being a positioned element — see the stacking-order note:
+   a positioned z-index:0 child would otherwise paint AFTER static in-flow
+   content, on top of it, not behind. .nav-item already has its own
+   position:relative + z-index:1, so this stays scoped to this button and
+   can never bleed above the rest of the nav bar. */
+.nav-item::before {
+  content: '';
+  position: absolute;
+  top: 6px; left: 50%; transform: translateX(-50%) scale(0.85);
+  width: 48px; height: 26px;
+  border-radius: 999px;
+  background: transparent;
+  opacity: 0;
+  transition: background 0.2s var(--ease), opacity 0.2s var(--ease), transform 0.2s var(--ease-spring);
+  z-index: -1;
+}
+.nav-item.active::before {
+  background: rgba(255, 255, 255, 0.1);
+  opacity: 1;
+  transform: translateX(-50%) scale(1);
+}
+.nav-icon { width: 20px; height: 20px; }
 .nav-icon svg { width: 100%; height: 100%; }
-.nav-label { font-size: 8px; font-weight: 600; }
+.nav-label { font-size: 9px; font-weight: 600; letter-spacing: 0.1px; }
 .nav-item:active .nav-icon { animation: navPop 0.3s var(--ease-spring); }
 @keyframes navPop {
   0% { transform: scale(1); }
@@ -565,6 +620,7 @@ body.has-now-playing .modal-overlay .modal {
   width: 64px; height: 64px; border-radius: 50%;
   background: var(--text-primary); color: #000;
   display: flex; align-items: center; justify-content: center;
+  box-shadow: var(--shadow-glow);
   transition: transform 0.15s var(--ease-spring);
 }
 .fp-play-btn .ic { width: 28px; height: 28px; }
@@ -604,12 +660,13 @@ body.has-now-playing .modal-overlay .modal {
      the same treatment any native app gets. Nothing to fix here. */
   background: var(--bg);
   display: flex; flex-direction: column;
-  /* Bottom padding used to be safe-area + 20px, THEN .fp-bottom-row added
-     its own +8px on top — on a real notched phone (safe-area ~34px) that
-     stacked up to ~62px of empty space below the last row, reading as a
-     "gray band" that squeezed everything above it upward. Only one layer
-     should own the safe-area clearance; trimmed to a small fixed gap here. */
-  padding: env(safe-area-inset-top) 20px calc(env(safe-area-inset-bottom) + 6px);
+  /* No bottom padding here anymore — .fp-deck (the scrubber/transport/
+     action-row wrapper below) now owns the safe-area clearance itself, as
+     part of its own "control shelf" background, so there is exactly one
+     place deciding how much empty space sits at the very bottom instead of
+     two paddings stacking (the old bug: safe-area+20px here PLUS
+     .fp-bottom-row's own +8px, ~62px of dead space on a notched phone). */
+  padding: env(safe-area-inset-top) 20px 0;
   transform: translateY(0);
   animation: fpSlideUp 0.4s var(--ease-spring);
   /* promotes the whole panel (including the heavily-blurred .fp-bg child)
@@ -619,24 +676,6 @@ body.has-now-playing .modal-overlay .modal {
      the blurred layer specifically, making the open animation look like it
      renders in two separate stages */
   will-change: transform;
-}
-/* Fades the blurred backdrop down to a flat, neutral dark tone right where
-   the OS's own home-indicator area begins, instead of cutting off abruptly
-   into whatever hard boundary sits there. A real-device debug test (bright
-   magenta background) showed the backdrop genuinely does paint behind that
-   whole zone — the "gray band" complaint is a hard-edge CONTRAST problem
-   (a vivid colorful backdrop meeting a flat dark strip with no transition),
-   not a coverage gap. Same z-index as .fp-bg (0, painted after it in source
-   order since ::after is generated last) so it sits above the backdrop but
-   below all real controls (z-index:1). */
-.full-player::after {
-  content: '';
-  position: absolute;
-  left: 0; right: 0; bottom: 0;
-  height: calc(env(safe-area-inset-bottom) + 24px);
-  background: linear-gradient(to bottom, transparent, var(--bg));
-  z-index: 0;
-  pointer-events: none;
 }
 .full-player.closing { animation: fpSlideDown 0.25s var(--ease) forwards; }
 @keyframes fpSlideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
@@ -719,6 +758,32 @@ body.has-now-playing .modal-overlay .modal {
 @keyframes iconSpin { to { transform: rotate(360deg); } }
 .icon-spin { animation: iconSpin 0.8s linear infinite; transform-origin: center; }
 
+/* The "control shelf" — scrubber, transport, and the Coda/Playlist/Testo/
+   Condividi row all live inside this one shared surface instead of sitting
+   directly on the bare .fp-bg backdrop. Bleeds edge-to-edge with a negative
+   margin (cancelling .full-player's own 20px side padding) then re-applies
+   its own horizontal padding, so the shelf's background/border genuinely
+   spans the full width. Its own gradient already fades down to a flat,
+   opaque var(--bg) well before the safe-area strip begins, so that strip
+   now reads as "the same shelf's own bottom edge continuing to the true
+   screen edge" rather than an unexplained flat gap after the content ends
+   — this is the direct answer to "avoid a useless band down there": make
+   the zone visibly, deliberately part of this component instead of dead
+   space after it. (The literal home-indicator inset itself is still drawn
+   by iOS on top of any page, real app or web — that part was confirmed via
+   a live debug marker test and isn't something any page's CSS can reach.) */
+.fp-deck {
+  position: relative;
+  margin: 0 -20px;
+  padding: 14px 20px calc(env(safe-area-inset-bottom) + 10px);
+  background: linear-gradient(to bottom,
+    rgba(255, 255, 255, 0.05) 0%,
+    rgba(255, 255, 255, 0.015) 45%,
+    var(--bg) 88%);
+  border-top: 1px solid var(--border-soft);
+  border-radius: var(--r-xl) var(--r-xl) 0 0;
+}
+
 .fp-info { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; }
 .fp-titles { min-width: 0; }
 .fp-title { font-size: 20px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -784,7 +849,14 @@ body.has-now-playing .modal-overlay .modal {
 }
 .fp-bottom-row .pill-btn {
   width: 48px; height: 48px; padding: 0; border-radius: 50%;
+  /* Sits on the new .fp-deck glass shelf rather than the flat page
+     background, so a plain solid --surface-2 fill would look like a
+     mismatched flat chip; a translucent fill reads as part of the same
+     glass surface instead. */
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 1px var(--border-soft);
 }
+.fp-bottom-row .pill-btn:active { background: rgba(255, 255, 255, 0.14); }
 .fp-bottom-row .pill-btn .ic { width: 20px; height: 20px; }
 
 .fp-lyrics-panel {
@@ -799,7 +871,7 @@ body.has-now-playing .modal-overlay .modal {
 }
 @keyframes slidePanelUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
 .fp-lyrics-head { display: flex; align-items: center; justify-content: space-between; font-weight: 700; margin-bottom: 12px; }
-.fp-lyrics-body { flex: 1; overflow-y: auto; font-size: 16px; line-height: 1.9; color: var(--text-secondary); white-space: pre-line; }
+.fp-lyrics-body { flex: 1; overflow-y: auto; overscroll-behavior-y: contain; font-size: 16px; line-height: 1.9; color: var(--text-secondary); white-space: pre-line; }
 
 /* ===== Modals ===== */
 .modal-overlay {
@@ -840,17 +912,19 @@ body.has-now-playing .modal-overlay .modal {
    a real-device report showed the native scrollbar rendering right on top
    of the track list's queue/like buttons at the row's edge, since the
    list has no reserved right-hand gutter for it. */
-.modal-body { overflow-y: auto; scrollbar-width: none; }
+.modal-body { overflow-y: auto; overscroll-behavior-y: contain; scrollbar-width: none; }
 .modal-body::-webkit-scrollbar { display: none; }
 .modal-field {
   width: 100%; background: var(--surface-2); border-radius: var(--r-md);
-  padding: 12px 14px; font-size: 14px; color: var(--text-primary); border: none; outline: none;
+  padding: 13px 14px; font-size: 16px; color: var(--text-primary); border: none; outline: none;
   margin-bottom: 12px;
 }
 .modal-field::placeholder { color: var(--text-secondary); }
 .modal-btn {
-  width: 100%; padding: 13px; border-radius: 999px;
-  background: var(--accent); color: #04120a; font-weight: 700; font-size: 14px;
+  width: 100%; padding: 14px; border-radius: 999px;
+  background: linear-gradient(135deg, var(--accent-2), var(--accent));
+  color: #04120a; font-weight: 700; font-size: 15px;
+  box-shadow: 0 6px 18px rgba(29, 185, 84, 0.28);
   transition: transform 0.1s var(--ease);
 }
 .modal-btn:active { transform: scale(0.97); }
@@ -941,7 +1015,7 @@ body.has-now-playing .modal-overlay .modal {
    mouse/trackpad input, never for touch. */
 @media (hover: hover) and (pointer: fine) {
   .icon-btn:hover { background: rgba(255, 255, 255, 0.08); }
-  .card:hover { transform: translateY(-4px); box-shadow: var(--shadow-lift); }
+  .card:hover { transform: translateY(-4px); box-shadow: var(--shadow-lift), inset 0 0 0 1px var(--border-soft); }
   .track-row:hover { background: rgba(255, 255, 255, 0.05); }
   .lib-row:hover { background: rgba(255, 255, 255, 0.05); }
   .fp-play-btn:hover { transform: scale(1.04); }
