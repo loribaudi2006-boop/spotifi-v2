@@ -594,7 +594,13 @@ body.has-now-playing .modal-overlay .modal {
 .full-player {
   position: fixed; inset: 0;
   z-index: var(--z-fullplayer);
-  background: var(--bg);
+  /* TEMPORARY DEBUG MARKER (2026-07-26) — bright magenta instead of var(--bg)
+     so a screenshot can show unambiguously whether the reported "gray band"
+     is this element's own base background showing through (meaning .fp-bg
+     isn't actually covering that area) or something else entirely (e.g. the
+     blurred backdrop's own content/filter making that area look flat/dark
+     even though it IS being painted there). Revert to var(--bg) once confirmed. */
+  background: #FF00FF;
   display: flex; flex-direction: column;
   /* Bottom padding used to be safe-area + 20px, THEN .fp-bottom-row added
      its own +8px on top — on a real notched phone (safe-area ~34px) that
