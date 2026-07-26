@@ -30,7 +30,7 @@
   --z-modal: 100;
   --z-toast: 200;
 
-  --mobile-nav-h: 44px;
+  --mobile-nav-h: 38px;
   --mini-player-h: 64px;
   --topbar-h: 52px;
 }
@@ -547,9 +547,9 @@ body.has-now-playing .modal-overlay .modal {
   touch-action: manipulation;
 }
 .nav-item.active { color: var(--text-primary); }
-.nav-icon { width: 20px; height: 20px; }
+.nav-icon { width: 18px; height: 18px; }
 .nav-icon svg { width: 100%; height: 100%; }
-.nav-label { font-size: 9px; font-weight: 600; }
+.nav-label { font-size: 8px; font-weight: 600; }
 .nav-item:active .nav-icon { animation: navPop 0.3s var(--ease-spring); }
 @keyframes navPop {
   0% { transform: scale(1); }
@@ -594,13 +594,15 @@ body.has-now-playing .modal-overlay .modal {
 .full-player {
   position: fixed; inset: 0;
   z-index: var(--z-fullplayer);
-  /* TEMPORARY DEBUG MARKER (2026-07-26) — bright magenta instead of var(--bg)
-     so a screenshot can show unambiguously whether the reported "gray band"
-     is this element's own base background showing through (meaning .fp-bg
-     isn't actually covering that area) or something else entirely (e.g. the
-     blurred backdrop's own content/filter making that area look flat/dark
-     even though it IS being painted there). Revert to var(--bg) once confirmed. */
-  background: #FF00FF;
+  /* 2026-07-26: a bright-magenta debug marker here (since reverted) proved
+     the reported "gray band at the bottom" is NOT a coverage gap in this
+     element or .fp-bg — every real pixel of .full-player painted magenta
+     correctly, except the strip right around the home-indicator, which
+     stayed solid black regardless. That strip is iOS's own reserved
+     home-indicator scrim, drawn by the OS on top of whatever the page
+     renders — not something any web page's CSS can reach or remove, and
+     the same treatment any native app gets. Nothing to fix here. */
+  background: var(--bg);
   display: flex; flex-direction: column;
   /* Bottom padding used to be safe-area + 20px, THEN .fp-bottom-row added
      its own +8px on top — on a real notched phone (safe-area ~34px) that
