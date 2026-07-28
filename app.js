@@ -137,6 +137,14 @@ function goTo(route) {
   // player along with it, which is what made the nav appear to "jump" when
   // switching to a shorter view.
   window.scrollTo(0, 0);
+  // A route whose content fits without scrolling (Cerca, Libreria) can
+  // leave Safari's env(safe-area-inset-*)/layout math in a different,
+  // stale state than a taller route (Home) until something forces a real
+  // layout pass — same class of bug nudgeSafeAreaLayout() already exists
+  // for (boot, full-player open, first tap), just not previously triggered
+  // on a plain tab switch.
+  forceReflow($('.bottom-nav'));
+  updateViewportOffset();
   $('#homeHeader').classList.toggle('hidden', route !== 'home');
   $('#searchHeader').classList.toggle('hidden', route !== 'search');
   $('#libraryHeader').classList.toggle('hidden', route !== 'library');
@@ -1925,6 +1933,22 @@ function nudgeSafeAreaLayout() {
   window.dispatchEvent(new Event('resize'));
 }
 
+/* iOS Safari can shrink the *visual* viewport (toolbar showing, on-screen
+   keyboard) without changing window.innerHeight the same way on every
+   route — a route whose content is short enough to never need scrolling
+   (Cerca, Libreria) can leave the toolbar in a different show/hide state
+   than a taller one (Home), which is one real, checkable reason the
+   bottom dock's on-screen position could differ between routes even
+   though its CSS never changes. Tracks exactly how much of the layout
+   viewport's bottom edge is currently hidden and feeds it back as a CSS
+   var (--vv-bottom-gap, see style.css) so the dock can compensate. */
+function updateViewportOffset() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const hiddenBottom = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop));
+  document.documentElement.style.setProperty('--vv-bottom-gap', hiddenBottom + 'px');
+}
+
 function boot() {
   fixStandaloneViewport();
   updateGreeting();
@@ -1940,6 +1964,11 @@ function boot() {
   goTo('home');
   requestAnimationFrame(() => requestAnimationFrame(nudgeSafeAreaLayout));
   document.addEventListener('pointerdown', nudgeSafeAreaLayout, { once: true });
+  updateViewportOffset();
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', updateViewportOffset);
+    window.visualViewport.addEventListener('scroll', updateViewportOffset);
+  }
 
   // A newly-activated service worker (see sw.js's skipWaiting/clients.claim)
   // now auto-reloads the page instead of silently taking control in the
