@@ -131,6 +131,7 @@ function showToast(msg, duration = 1500) {
 let currentRoute = 'home';
 function goTo(route) {
   currentRoute = route;
+  forceViewportRecalc();
   updateDebugHud();
   // Switching tabs without resetting scroll leaves the page scrolled past
   // the new (often shorter) view's actual height — on iOS Safari that
@@ -398,6 +399,7 @@ let searchDebounce = null;
 function setupSearchInput() {
   setIcon($('.search-ic'), ICONS.search(false));
   const input = $('#searchInput');
+  input.addEventListener('blur', () => setTimeout(forceViewportRecalc, 350));
   input.addEventListener('input', () => {
     clearTimeout(searchDebounce);
     hideSearchHistoryDropdown();
@@ -1928,6 +1930,24 @@ function nudgeSafeAreaLayout() {
   forceReflow($('.bottom-nav'));
   forceReflow($('.mini-player'));
   window.dispatchEvent(new Event('resize'));
+}
+
+/* Known WebKit standalone-PWA bug: after the on-screen keyboard closes,
+   window.innerHeight / visualViewport.height can stay stuck at the smaller
+   "keyboard open" size instead of reverting — a plain synthetic 'resize'
+   event does NOT fix this, since it's the browser's own internal viewport
+   geometry that's stale, not just something JS-observable. Rewriting the
+   viewport <meta> tag forces a real reparse/recalculation. */
+function forceViewportRecalc() {
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+  if (!isStandalone) return;
+  const meta = document.querySelector('meta[name="viewport"]');
+  if (!meta) return;
+  meta.setAttribute('content', `width=${window.innerWidth}, initial-scale=1, viewport-fit=cover, user-scalable=yes`);
+  requestAnimationFrame(() => {
+    meta.setAttribute('content', `width=${window.innerWidth}, initial-scale=1, viewport-fit=cover, user-scalable=no`);
+    updateDebugHud();
+  });
 }
 
 /* ============ TEMPORARY DEBUG HUD — remove once bug is diagnosed ============ */
