@@ -131,7 +131,6 @@ function showToast(msg, duration = 1500) {
 let currentRoute = 'home';
 function goTo(route) {
   currentRoute = route;
-  updateDebugHud();
   // Switching tabs without resetting scroll leaves the page scrolled past
   // the new (often shorter) view's actual height — on iOS Safari that
   // overscrolled state can snap back and drag the fixed bottom-nav/mini-
@@ -152,8 +151,6 @@ function goTo(route) {
   if (route === 'home') renderHome();
   if (route === 'search') renderSearch();
   if (route === 'library') renderLibrary();
-  setTimeout(updateDebugHud, 150);
-  setTimeout(updateDebugHud, 500);
 }
 
 function setupNav() {
@@ -1633,8 +1630,6 @@ function openFullPlayer() {
   $('#fullPlayer').classList.remove('hidden');
   $('#fullPlayer').classList.remove('closing');
   $('#fpBg').classList.remove('visible');
-  updateDebugHud();
-  setTimeout(updateDebugHud, 450);
   // fade the blurred backdrop in only once the (cheap, sharp-content-only)
   // slide-up has actually finished — see the .fp-bg CSS comment
   setTimeout(() => $('#fpBg').classList.add('visible'), 400);
@@ -1930,45 +1925,6 @@ function nudgeSafeAreaLayout() {
   window.dispatchEvent(new Event('resize'));
 }
 
-/* ============ TEMPORARY DEBUG HUD — remove once bug is diagnosed ============ */
-function updateDebugHud() {
-  let hud = document.getElementById('debugHud');
-  if (!hud) {
-    hud = document.createElement('div');
-    hud.id = 'debugHud';
-    hud.style.cssText =
-      'position:fixed;top:0;left:0;right:0;z-index:999999;background:rgba(255,0,120,0.92);' +
-      'color:#fff;font:11px/1.5 monospace;padding:4px 8px;white-space:pre-wrap;' +
-      'pointer-events:none;';
-    document.body.appendChild(hud);
-  }
-  const vv = window.visualViewport;
-  const probe = document.createElement('div');
-  probe.style.cssText = 'position:fixed;bottom:0;height:0;padding-bottom:env(safe-area-inset-bottom);visibility:hidden;';
-  document.body.appendChild(probe);
-  const safeB = getComputedStyle(probe).paddingBottom;
-  probe.remove();
-  const nav = document.querySelector('.bottom-nav');
-  const navRect = nav ? nav.getBoundingClientRect() : null;
-  const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
-  hud.textContent =
-    'route=' + currentRoute +
-    ' | standalone=' + !!standalone +
-    ' | innerH=' + window.innerHeight +
-    ' | vvH=' + (vv ? Math.round(vv.height) : 'n/a') +
-    ' | vvOffsetTop=' + (vv ? Math.round(vv.offsetTop) : 'n/a') +
-    ' | scrollY=' + Math.round(window.scrollY) +
-    ' | safe-b=' + safeB +
-    ' | nav.top=' + (navRect ? Math.round(navRect.top) : 'n/a') +
-    ' | nav.bottom=' + (navRect ? Math.round(navRect.bottom) : 'n/a');
-}
-window.addEventListener('resize', updateDebugHud);
-window.addEventListener('scroll', updateDebugHud);
-if (window.visualViewport) {
-  window.visualViewport.addEventListener('resize', updateDebugHud);
-  window.visualViewport.addEventListener('scroll', updateDebugHud);
-}
-/* ============================================================================ */
 function boot() {
   fixStandaloneViewport();
   updateGreeting();
