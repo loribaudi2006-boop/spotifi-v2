@@ -28,11 +28,6 @@
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-l: env(safe-area-inset-left, 0px);
   --safe-r: env(safe-area-inset-right, 0px);
-  /* How much of the layout viewport's bottom edge is currently hidden by
-     Safari's own toolbar/keyboard chrome — kept at 0px by default and
-     updated live by updateViewportOffset() in app.js. See the .bottom-nav
-     comment below for why this exists. */
-  --vv-bottom-gap: 0px;
 
   /* palette — accent green pulled slightly toward mint/emerald, a violet
      companion used only as a rare glass-sheen highlight, never as a second
@@ -79,8 +74,8 @@
   --dock-gap: 14px;
   --mini-gap: 10px;
 
-  --dock-nav-offset: calc(var(--safe-b) + var(--dock-gap) + var(--vv-bottom-gap));
-  --dock-mini-offset: calc(var(--safe-b) + var(--dock-gap) + var(--nav-h) + var(--mini-gap) + var(--vv-bottom-gap));
+  --dock-nav-offset: calc(var(--safe-b) + var(--dock-gap));
+  --dock-mini-offset: calc(var(--safe-b) + var(--dock-gap) + var(--nav-h) + var(--mini-gap));
   --dock-reserve: calc(var(--safe-b) + var(--dock-gap) + var(--nav-h) + 22px);
   --dock-reserve-playing: calc(
     var(--safe-b) + var(--dock-gap) + var(--nav-h) + var(--mini-gap) + var(--mini-h) + 22px
@@ -755,12 +750,10 @@ body.has-now-playing #views { padding-bottom: var(--dock-reserve-playing); }
 /* =========================================================================
    14. Bottom nav — floating glass dock, deliberately inset from every edge
    ========================================================================= */
-/* `bottom` includes --vv-bottom-gap (see the token comment above) because a
-   route whose content is short enough to never need scrolling (Cerca,
-   Libreria) can leave Safari's toolbar in a different show/hide state than
-   a taller route (Home) — position:fixed is anchored to the *visible*
-   viewport, so when the toolbar/keyboard eats into it, this dock needs to
-   move up by exactly that amount to stay put on-screen. */
+/* Position is left to native iOS/Android fixed-positioning behaviour, which
+   already anchors to the currently-visible viewport (not the nominal layout
+   viewport) on modern browsers — no manual toolbar/keyboard compensation
+   needed here. */
 .bottom-nav {
   position: fixed;
   left: calc(16px + var(--safe-l));
