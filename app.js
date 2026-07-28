@@ -131,7 +131,7 @@ function showToast(msg, duration = 1500) {
 let currentRoute = 'home';
 function goTo(route) {
   currentRoute = route;
-  forceViewportRecalc();
+  scheduleViewportRecalc();
   updateDebugHud();
   // Switching tabs without resetting scroll leaves the page scrolled past
   // the new (often shorter) view's actual height — on iOS Safari that
@@ -399,7 +399,6 @@ let searchDebounce = null;
 function setupSearchInput() {
   setIcon($('.search-ic'), ICONS.search(false));
   const input = $('#searchInput');
-  input.addEventListener('blur', () => setTimeout(forceViewportRecalc, 350));
   input.addEventListener('input', () => {
     clearTimeout(searchDebounce);
     hideSearchHistoryDropdown();
@@ -1949,6 +1948,22 @@ function forceViewportRecalc() {
     updateDebugHud();
   });
 }
+// Belt-and-braces: run the recalc from every point that could plausibly
+// leave the viewport "stuck" small, not just the one path already caught —
+// any text field losing focus anywhere in the app (modals included), the
+// app coming back to the foreground, and orientation changes. Each call is
+// cheap (one meta-tag rewrite + a rAF), so firing from several places
+// costs nothing and removes the need to have correctly guessed the one
+// exact trigger.
+function scheduleViewportRecalc() {
+  forceViewportRecalc();
+  setTimeout(forceViewportRecalc, 350);
+  setTimeout(forceViewportRecalc, 700);
+}
+document.addEventListener('focusout', scheduleViewportRecalc, true);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) scheduleViewportRecalc(); });
+window.addEventListener('pageshow', scheduleViewportRecalc);
+window.addEventListener('orientationchange', scheduleViewportRecalc);
 
 /* ============ TEMPORARY DEBUG HUD — remove once bug is diagnosed ============ */
 function updateDebugHud() {
