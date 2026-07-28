@@ -438,7 +438,7 @@ svg.icon-spin { transform-box: fill-box; transform-origin: 50% 50%; }
   color: var(--text-secondary);
   font-size: 13.5px;
   font-weight: 600;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
   white-space: nowrap;
 }
 .chip.active {
@@ -793,6 +793,11 @@ body.has-now-playing #views { padding-bottom: var(--dock-reserve-playing); }
   flex-direction: column;
   background: linear-gradient(180deg, var(--bg-void-2), var(--bg-void));
   animation: fpSlideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  /* Promotes this to its own compositor layer up front so the slide-up
+     translates a cached bitmap instead of repainting the blurred .fp-bg
+     backdrop on every frame — the difference is very noticeable on
+     weaker phones. */
+  will-change: transform;
 }
 .full-player.closing { animation: fpSlideDown 0.25s ease forwards; }
 @keyframes fpSlideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
@@ -800,7 +805,12 @@ body.has-now-playing #views { padding-bottom: var(--dock-reserve-playing); }
 
 .fp-bg {
   position: absolute;
-  inset: -12%;
+  /* vh/vw, not a percentage: a percentage inset here has previously
+     resolved inconsistently against .full-player's padding box (which
+     mixes in env(safe-area-inset-*)) on real iOS Safari, producing a
+     visible seam near the bottom safe area — vh/vw always resolves
+     against the true viewport instead. */
+  inset: -15vh -15vw;
   background-size: cover;
   background-position: center;
   filter: blur(75px) saturate(170%) brightness(0.5);
@@ -837,6 +847,7 @@ body.has-now-playing #views { padding-bottom: var(--dock-reserve-playing); }
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
+.fp-context-spacer { width: 40px; height: 40px; flex-shrink: 0; }
 
 .fp-cover-wrap {
   position: relative;
@@ -1048,6 +1059,7 @@ body.has-now-playing #views { padding-bottom: var(--dock-reserve-playing); }
   margin-bottom: var(--dock-reserve);
   animation: modalIn 0.32s cubic-bezier(0.16, 1, 0.3, 1);
   overflow: hidden;
+  will-change: transform;
 }
 body.has-now-playing .modal { margin-bottom: var(--dock-reserve-playing); }
 @keyframes modalIn { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
@@ -1181,7 +1193,7 @@ body.has-now-playing .modal { margin-bottom: var(--dock-reserve-playing); }
   justify-content: center;
   flex-shrink: 0;
   color: var(--accent-ink);
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 .atp-row-check .ic { width: 13px; height: 13px; }
 .atp-row-check.checked { background: var(--accent); border-color: var(--accent); }

@@ -110,10 +110,12 @@
       <div class="fp-handle-bar"></div>
       <button type="button" class="icon-btn fp-close" id="fpCloseBtn" aria-label="Chiudi"><span class="ic"></span></button>
       <div class="fp-context">In riproduzione</div>
-      <!-- Same width/height as .fp-close, purely so "In riproduzione" stays centered via
+      <!-- Same width as .fp-close, purely so "In riproduzione" stays centered via
            justify-content:space-between — the queue button that used to live here was a
-           duplicate of #fpQueueBtn2 below and has been removed, not just hidden. -->
-      <div class="icon-btn" aria-hidden="true"></div>
+           duplicate of #fpQueueBtn2 below and has been removed, not just hidden.
+           Deliberately NOT .icon-btn: that class paints a visible circle/border,
+           which made this look like a real (but broken) button. -->
+      <div class="fp-context-spacer" aria-hidden="true"></div>
     </div>
 
     <div class="fp-cover-wrap" id="fpCoverWrap">

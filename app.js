@@ -131,6 +131,12 @@ function showToast(msg, duration = 1500) {
 let currentRoute = 'home';
 function goTo(route) {
   currentRoute = route;
+  // Switching tabs without resetting scroll leaves the page scrolled past
+  // the new (often shorter) view's actual height — on iOS Safari that
+  // overscrolled state can snap back and drag the fixed bottom-nav/mini-
+  // player along with it, which is what made the nav appear to "jump" when
+  // switching to a shorter view.
+  window.scrollTo(0, 0);
   $('#homeHeader').classList.toggle('hidden', route !== 'home');
   $('#searchHeader').classList.toggle('hidden', route !== 'search');
   $('#libraryHeader').classList.toggle('hidden', route !== 'library');
@@ -1695,6 +1701,13 @@ function setupFullPlayerDismiss() {
   // music apps let you swipe down from anywhere on the artwork, not just a
   // small handle strip.
   [$('#fpDragHandle'), $('#fpCoverWrap')].forEach((el) => {
+    // Without this, a real touchscreen can hand the vertical drag to the
+    // browser's own scroll/bounce gesture instead of our pointer events,
+    // which is why swipe-to-dismiss stopped working after the CSS rewrite
+    // dropped the touch-action:none this used to get from the stylesheet —
+    // set directly here (matching enableModalSwipeDismiss's own approach)
+    // so it no longer depends on style.css declaring it.
+    el.style.touchAction = 'none';
     el.addEventListener('pointerdown', onDown);
     el.addEventListener('pointermove', onMove);
     el.addEventListener('pointerup', onUp);
