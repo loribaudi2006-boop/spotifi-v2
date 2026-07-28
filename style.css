@@ -117,6 +117,7 @@ button {
   cursor: pointer;
   -webkit-appearance: none;
   appearance: none;
+  touch-action: manipulation;
 }
 img { max-width: 100%; display: block; }
 a { color: inherit; }
@@ -407,6 +408,7 @@ svg.icon-spin { transform-box: fill-box; transform-origin: 50% 50%; }
   transition: background 0.15s ease;
 }
 .shd-row:hover { background: var(--surface-1); }
+.shd-row:active { background: var(--surface-1); transform: scale(0.99); }
 .shd-row-img { width: 40px; height: 40px; border-radius: var(--r-sm); object-fit: cover; flex-shrink: 0; }
 .shd-row-meta { min-width: 0; flex: 1; }
 .shd-row-title { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -453,6 +455,23 @@ svg.icon-spin { transform-box: fill-box; transform-origin: 50% 50%; }
   border-color: var(--accent);
   color: var(--accent-ink);
 }
+.chip:active { transform: scale(0.95); }
+
+/* Two long, mutually-exclusive options (audio quality) read better as
+   full-width stacked rows than as a horizontally-scrolling chip strip —
+   the chip-row's overflow-x:auto was clipping "128 kbps · Qualità
+   migliore" at the card edge instead of letting it scroll into view. */
+#qualityChips {
+  flex-direction: column;
+  overflow-x: visible;
+  gap: 10px;
+}
+#qualityChips .chip {
+  width: 100%;
+  white-space: normal;
+  text-align: center;
+  padding: 12px 16px;
+}
 
 /* =========================================================================
    7. Main views
@@ -497,13 +516,16 @@ body.has-now-playing #views { padding-bottom: var(--dock-reserve-playing); }
   display: flex;
   gap: 12px;
   overflow-x: auto;
-  padding: 2px 2px 8px;
+  margin: 0 -16px;
+  padding: 2px 16px 8px;
   scroll-snap-type: x proximity;
 }
 .lib-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
-  gap: 16px;
+  grid-auto-rows: min-content;
+  align-items: start;
+  gap: 16px 14px;
 }
 
 .card {
@@ -524,7 +546,7 @@ body.has-now-playing #views { padding-bottom: var(--dock-reserve-playing); }
   border: 1px solid var(--glass-border-soft);
   box-shadow: var(--shadow-soft);
 }
-.card-img-wrap img { width: 100%; height: 100%; object-fit: cover; }
+.card-img-wrap img { width: 100%; height: 100%; object-fit: cover; transform: scale(1.15); }
 .artist-card .card-img-wrap,
 .artist-card .card-img-wrap img { border-radius: 50%; }
 .card-body { padding: 10px 3px 0; }
@@ -608,11 +630,13 @@ body.has-now-playing #views { padding-bottom: var(--dock-reserve-playing); }
   position: relative;
   aspect-ratio: 2.1 / 1;
   border-radius: var(--r-lg);
+  transition: transform 0.15s ease;
   overflow: hidden;
   padding: 14px;
   text-align: left;
   box-shadow: var(--shadow-soft);
 }
+.cat-tile:active { transform: scale(0.96); }
 .cat-tile::after {
   content: '';
   position: absolute;
@@ -649,6 +673,7 @@ body.has-now-playing #views { padding-bottom: var(--dock-reserve-playing); }
   transition: background 0.15s ease;
 }
 .track-row:hover { background: var(--surface-1); }
+.track-row:active { background: var(--surface-1); transform: scale(0.99); }
 .track-row.now-playing-highlight { background: var(--accent-soft); }
 .track-row-img { width: 48px; height: 48px; border-radius: var(--r-sm); object-fit: cover; flex-shrink: 0; }
 .track-row-meta { min-width: 0; flex: 1; }
@@ -691,6 +716,7 @@ body.has-now-playing #views { padding-bottom: var(--dock-reserve-playing); }
   transition: background 0.15s ease;
 }
 .lib-row:hover { background: var(--surface-1); }
+.lib-row:active { background: var(--surface-1); transform: scale(0.99); }
 .lib-row.now-playing-highlight { background: var(--accent-soft); }
 .lib-row-img { width: 52px; height: 52px; border-radius: var(--r-sm); object-fit: cover; flex-shrink: 0; }
 .lib-row-title { font-size: 14.5px; font-weight: 600; }
@@ -735,7 +761,7 @@ body.has-now-playing #views { padding-bottom: var(--dock-reserve-playing); }
   flex-shrink: 0;
   background: var(--surface-1);
 }
-.mp-cover img { width: 100%; height: 100%; object-fit: cover; }
+.mp-cover img { width: 100%; height: 100%; object-fit: cover; transform: scale(1.15); }
 .mp-meta { min-width: 0; flex: 1; }
 .mp-title { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mp-artist { font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
@@ -882,7 +908,7 @@ body.has-now-playing #views { padding-bottom: var(--dock-reserve-playing); }
   box-shadow: var(--shadow-float);
   border: 1px solid var(--glass-border-soft);
 }
-.fp-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fp-cover img { width: 100%; height: 100%; object-fit: cover; display: block; transform: scale(1.15); }
 
 .fp-info {
   position: relative;
@@ -1058,7 +1084,7 @@ body.has-now-playing #views { padding-bottom: var(--dock-reserve-playing); }
 .modal {
   width: 100%;
   max-width: 520px;
-  max-height: min(80vh, 680px);
+  max-height: min(80vh, 680px, calc(100dvh - var(--safe-t) - 28px));
   display: flex;
   flex-direction: column;
   border-radius: var(--r-xl);
@@ -1097,6 +1123,8 @@ body.has-now-playing .modal { margin-bottom: var(--dock-reserve-playing); }
 }
 .modal-title { font-size: 17px; font-weight: 700; }
 .modal-body {
+  flex: 1;
+  min-height: 0;
   padding: 16px 18px calc(18px + var(--safe-b));
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
@@ -1166,7 +1194,7 @@ body.has-now-playing .modal { margin-bottom: var(--dock-reserve-playing); }
   border: 1px solid var(--glass-border-soft);
 }
 .pl-detail-cover { width: 100%; height: 100%; }
-.pl-detail-cover img { width: 100%; height: 100%; object-fit: cover; }
+.pl-detail-cover img { width: 100%; height: 100%; object-fit: cover; transform: scale(1.15); }
 .pl-detail-name {
   font-size: 21px;
   font-weight: 700;
@@ -1179,7 +1207,7 @@ body.has-now-playing .modal { margin-bottom: var(--dock-reserve-playing); }
 .pl-detail-actions { display: flex; gap: 10px; margin: 14px 0 18px; }
 .pl-detail-actions .modal-btn { margin-bottom: 0; }
 .pl-detail-actions .pill-btn { flex-shrink: 0; }
-.pl-detail-modal { max-height: min(85vh, 720px); }
+.pl-detail-modal { max-height: min(85vh, 720px, calc(100dvh - var(--safe-t) - 28px)); }
 
 /* add-to-playlist modal */
 .atp-row {
@@ -1193,6 +1221,7 @@ body.has-now-playing .modal { margin-bottom: var(--dock-reserve-playing); }
   transition: background 0.15s ease;
 }
 .atp-row:hover { background: var(--surface-1); }
+.atp-row:active { background: var(--surface-1); transform: scale(0.99); }
 .atp-row.atp-new { border-bottom: 1px solid var(--glass-border-soft); margin-bottom: 6px; padding-bottom: 16px; }
 .atp-row-check {
   width: 24px;
