@@ -141,7 +141,14 @@ a { color: inherit; }
 
 #app {
   position: relative;
-  min-height: 100%;
+  /* Deliberately more than 100dvh, not equal to it: a page exactly as tall
+     as the viewport (or shorter) is not scrollable, and on standalone-PWA
+     iOS that measurably changes how the real viewport height is computed
+     versus a route with scrollable overflow — this is what made Cerca and
+     Libreria (often short/empty) render ~50px shorter than Home (always
+     tall enough to scroll). Keeping every route trivially scrollable keeps
+     that calculation identical everywhere. */
+  min-height: calc(100dvh + 2px);
   isolation: isolate;
   padding-top: var(--topbar-total-h);
 }
