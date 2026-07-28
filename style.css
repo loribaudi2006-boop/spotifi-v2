@@ -1,1034 +1,1284 @@
-/* ===== Design tokens ===== */
+/* =========================================================================
+   SPOTIFI — stylesheet
+   =========================================================================
+   Design concept: "frosted glass over a blurred album-art atmosphere".
+   Every fixed surface (top bar, bottom nav, mini player, full player, modals,
+   dropdowns) is a translucent, blurred panel that floats above #ambientBg —
+   a huge, softly blurred projection of whatever's currently playing. Colour
+   in this app always comes from the music itself: nothing plays → a quiet
+   neutral dark glow; something plays → the whole interface tints toward
+   that cover art's own colours. Corners are large and consistently rounded
+   everywhere (cards, sheets, buttons, tiles) for a soft, modern feel.
+
+   Performance note: backdrop-filter blur is applied generously on the small
+   number of large, mostly-static chrome surfaces (bars, nav, players,
+   modals) where it reads clearly — and kept cheaper/lighter on repeated
+   small elements (cards, rows, tiles) so scrolling long lists stays smooth
+   on real phones.
+   ========================================================================= */
+
+/* =========================================================================
+   1. Tokens
+   ========================================================================= */
 :root {
   color-scheme: dark;
-  --bg: #121212;
-  --surface-1: #181818;
-  --surface-2: #282828;
-  --accent: #1DB954;
-  /* Brighter sibling of --accent, used only for gradient endpoints (CTA
-     buttons, play-button glow) — never as a flat fill on its own, so every
-     existing flat use of --accent (chips, highlights, icons) is untouched. */
-  --accent-2: #1ED760;
-  --text-primary: #FFFFFF;
-  --text-secondary: #B3B3B3;
 
-  /* Low-opacity hairline used for card/row edge definition on a true-black
-     background — an alternative to a heavier shadow alone, cheap to render
-     and doesn't create the flat-color-seam issue documented below for
-     larger bars (a 1px translucent line reads as an intentional edge, not
-     a mismatched block of color). */
-  --border-soft: rgba(255, 255, 255, 0.07);
+  /* safe areas */
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
 
-  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  /* palette — accent green pulled slightly toward mint/emerald, a violet
+     companion used only as a rare glass-sheen highlight, never as a second
+     "main" colour */
+  --bg-void: #07070b;
+  --bg-void-2: #0d0d16;
+  --accent: #23e08a;
+  --accent-soft: rgba(35, 224, 138, 0.18);
+  --accent-2: #7c6cff;
+  --accent-ink: #052316;
 
-  --r-sm: 8px;
-  --r-md: 12px;
-  --r-lg: 18px;
+  --text-primary: #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.64);
+  --text-tertiary: rgba(255, 255, 255, 0.4);
+
+  /* glass surfaces — referenced directly by app.js as inline styles too */
+  --surface-1: rgba(255, 255, 255, 0.055);
+  --surface-2: rgba(255, 255, 255, 0.1);
+
+  --glass-border-soft: rgba(255, 255, 255, 0.08);
+  --glass-border: rgba(255, 255, 255, 0.14);
+  --glass-border-strong: rgba(255, 255, 255, 0.24);
+
+  --shadow-float: 0 18px 46px rgba(0, 0, 0, 0.5), 0 2px 10px rgba(0, 0, 0, 0.35);
+  --shadow-soft: 0 6px 22px rgba(0, 0, 0, 0.35);
+  --shadow-btn: 0 8px 22px rgba(35, 224, 138, 0.28);
+
+  --blur-strong: 30px;
+  --blur-soft: 14px;
+
+  --r-full: 999px;
   --r-xl: 26px;
+  --r-lg: 18px;
+  --r-md: 14px;
+  --r-sm: 10px;
 
-  --ease: cubic-bezier(0.4, 0, 0.2, 1);
-  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --font-display: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
 
-  --shadow-rest: 0 2px 10px rgba(0, 0, 0, 0.4);
-  --shadow-lift: 0 10px 28px rgba(0, 0, 0, 0.5);
-  --shadow-glow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 0 32px rgba(29, 185, 84, 0.22);
+  /* bottom dock geometry: bottom-nav always visible; mini-player floats
+     directly above it once something is playing */
+  --nav-h: 64px;
+  --mini-h: 72px;
+  --dock-gap: 14px;
+  --mini-gap: 10px;
 
-  /* z-index scale, defined once so layering never has to be guessed/patched later */
-  --z-content: 1;
-  --z-header: 15;
-  --z-nav: 20;
-  --z-miniplayer: 30;
-  --z-fullplayer: 50;
-  --z-modal: 100;
-  --z-toast: 200;
+  --dock-nav-offset: calc(var(--safe-b) + var(--dock-gap));
+  --dock-mini-offset: calc(var(--safe-b) + var(--dock-gap) + var(--nav-h) + var(--mini-gap));
+  --dock-reserve: calc(var(--safe-b) + var(--dock-gap) + var(--nav-h) + 22px);
+  --dock-reserve-playing: calc(
+    var(--safe-b) + var(--dock-gap) + var(--nav-h) + var(--mini-gap) + var(--mini-h) + 22px
+  );
 
-  /* Was 38px (a prior session's reactive shrink) — below either native
-     platform's own tab-bar convention (iOS ~49pt, Android 56dp), which is
-     the more likely real reason it read as cramped rather than "compact".
-     56px matches that convention while the bar's actual *content* (icon +
-     label) is unchanged, so there's simply more breathing room around it. */
-  --mobile-nav-h: 56px;
-  --mini-player-h: 64px;
-  --topbar-h: 52px;
+  --app-max-w: 480px;
+  --topbar-total-h: calc(var(--safe-t) + 60px);
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
-
-html, body {
-  background: var(--bg);
-  color: var(--text-primary);
-  font-family: var(--font);
-  height: 100%;
-  overflow-x: hidden;
+/* =========================================================================
+   2. Reset & base
+   ========================================================================= */
+* {
+  box-sizing: border-box;
   -webkit-tap-highlight-color: transparent;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100%;
-  /* Kills the rubber-band/bounce-scroll + pull-to-refresh gesture at the
-     page edges — on a real phone that bounce is the single strongest "this
-     is a browser tab" tell; a real app's own scroll views clip at their
-     bounds instead. Purely a feel change, no scroll behavior any view
-     actually depends on is altered. */
+}
+html, body {
+  height: 100%;
+  background: var(--bg-void);
   overscroll-behavior-y: none;
 }
-
-button, input { font-family: inherit; color: inherit; }
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  color: var(--text-primary);
+  font-size: 15px;
+  line-height: 1.35;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+button, input {
+  font-family: inherit;
+  color: inherit;
+}
 button {
-  background: none; border: none; cursor: pointer;
-  outline: none;
-  -webkit-tap-highlight-color: transparent;
-  -webkit-user-select: none; user-select: none;
-  -webkit-appearance: none; appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
 }
-/* Belt-and-suspenders against the translucent "rectangle" some Android
-   WebView/Chrome builds paint behind a button right after it's tapped —
-   in practice this is almost always either (a) a lingering default focus
-   ring the UA still draws despite outline:none on button, or (b) Chrome's
-   own auto-dark-theme heuristic adding a contrast patch to an element it
-   can't tell is already intentionally dark (see the color-scheme:dark
-   declaration above, which opts the whole page out of that heuristic).
-   Covering both explicitly rather than assuming either one alone is enough. */
-button:focus, button:focus-visible,
-.nav-item:focus, .nav-item:focus-visible,
-.icon-btn:focus, .icon-btn:focus-visible {
-  outline: none;
-  box-shadow: none;
-}
-img { display: block; max-width: 100%; }
-a { color: inherit; text-decoration: none; }
+img { max-width: 100%; display: block; }
+a { color: inherit; }
+::selection { background: var(--accent); color: var(--accent-ink); }
 
-#app { position: relative; min-height: 100vh; }
+::-webkit-scrollbar { width: 0; height: 0; }
+.hide-scrollbar, .home-carousel, .chip-row {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.hide-scrollbar::-webkit-scrollbar,
+.home-carousel::-webkit-scrollbar,
+.chip-row::-webkit-scrollbar { display: none; }
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
 
 .hidden { display: none !important; }
 
-/* ===== Ambient lighting =====
-   Deliberately the more vivid of the two tint treatments (less blur, more
-   saturation, higher opacity) — the center content area, where the songs
-   themselves live, is where the cover art's real color should show through
-   the most. The bars (.bar-cover-tint below) get the opposite, muted
-   treatment, per an explicit request to swap which zone reads as "colorful"
-   vs "flat/dark" — previously it was the other way around. */
+#app {
+  position: relative;
+  min-height: 100%;
+  isolation: isolate;
+  padding-top: var(--topbar-total-h);
+}
+
+h1, h2, h3, .section-title, .modal-title, .lh-title, .hh-greeting,
+.fp-title, .pl-detail-name, .empty-state-title {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+/* =========================================================================
+   3. Ambient background — the app's single biggest signature element.
+   A soft, oversized, heavily blurred projection of the current cover art,
+   sitting behind literally everything else.
+   ========================================================================= */
 #ambientBg {
   position: fixed;
-  top: -10vh; bottom: -10vh; left: -10vw; right: -10vw;
+  inset: -10%;
   z-index: 0;
+  background:
+    radial-gradient(circle at 20% 10%, rgba(124, 108, 255, 0.35), transparent 55%),
+    radial-gradient(circle at 85% 15%, rgba(35, 224, 138, 0.3), transparent 50%),
+    radial-gradient(circle at 50% 90%, rgba(35, 224, 138, 0.18), transparent 60%),
+    var(--bg-void);
   background-size: cover;
   background-position: center;
-  filter: blur(45px) saturate(1.25);
-  opacity: 0;
-  transition: opacity 0.9s var(--ease), background-image 0.5s var(--ease);
+  filter: blur(70px) saturate(150%) brightness(0.5);
+  transform: scale(1.15);
+  opacity: 0.7;
+  transition: opacity 0.7s ease, filter 0.7s ease;
   pointer-events: none;
-  will-change: opacity;
 }
-#ambientBg.playing { opacity: 0.35; }
+#ambientBg.playing {
+  opacity: 0.9;
+  filter: blur(70px) saturate(185%) brightness(0.62);
+}
 
-/* ===== Icons (injected via JS, sized/colored here) ===== */
-.ic { display: inline-flex; width: 22px; height: 22px; }
-.ic svg { width: 100%; height: 100%; display: block; }
-.icon-btn {
-  display: flex; align-items: center; justify-content: center;
-  width: 40px; height: 40px; border-radius: 50%;
-  flex-shrink: 0;
-  color: var(--text-primary);
-  transition: background 0.15s var(--ease), transform 0.1s var(--ease);
-  -webkit-tap-highlight-color: transparent;
-  touch-action: manipulation;
+/* =========================================================================
+   4. Top bar (always visible, all routes)
+   ========================================================================= */
+.top-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 600;
+  height: var(--topbar-total-h);
+  padding: calc(var(--safe-t) + 10px) calc(16px + var(--safe-r)) 10px calc(16px + var(--safe-l));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(to bottom, rgba(7, 7, 12, 0.6), rgba(7, 7, 12, 0.05));
+  backdrop-filter: blur(var(--blur-strong)) saturate(160%);
+  -webkit-backdrop-filter: blur(var(--blur-strong)) saturate(160%);
+  border-bottom: 1px solid var(--glass-border-soft);
 }
-.icon-btn:active { transform: scale(0.9); }
+.bar-cover-tint {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center 30%;
+  filter: blur(30px) saturate(180%) brightness(0.6);
+  opacity: 0;
+  transition: opacity 0.6s ease;
+  pointer-events: none;
+}
+.bar-cover-tint.playing { opacity: 0.9; }
+
+.account-btn {
+  position: relative;
+  z-index: 1;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background-color: var(--surface-2);
+  background-size: cover;
+  background-position: center;
+  border: 1px solid var(--glass-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-primary);
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+.account-btn:active { transform: scale(0.93); }
+.account-btn .ic { width: 20px; height: 20px; }
+
+.tb-actions {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* =========================================================================
+   5. Icon buttons & icon sizing (shared everywhere)
+   ========================================================================= */
+.ic, .nav-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: inherit;
+  flex-shrink: 0;
+}
+.ic svg, .nav-icon svg { width: 100%; height: 100%; display: block; }
+svg.icon-spin { transform-box: fill-box; transform-origin: 50% 50%; }
+
+.icon-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-1);
+  border: 1px solid var(--glass-border-soft);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+.icon-btn:hover { background: var(--surface-2); color: var(--text-primary); }
+.icon-btn:active { transform: scale(0.92); }
 
 .pill-btn {
-  display: flex; align-items: center; justify-content: center; gap: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 46px;
+  padding: 0 18px;
+  border-radius: var(--r-full);
+  background: var(--surface-1);
+  border: 1px solid var(--glass-border-soft);
   color: var(--text-secondary);
-  font-size: 13px; font-weight: 600;
-  padding: 9px 14px; border-radius: 999px;
-  background: var(--surface-2);
-  transition: color 0.15s var(--ease), background 0.15s var(--ease), transform 0.1s var(--ease);
+  font-size: 13.5px;
+  font-weight: 600;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
 }
-.pill-btn .ic { width: 16px; height: 16px; }
-.pill-btn:active { transform: scale(0.95); background: var(--surface-1); }
+.pill-btn:hover { background: var(--surface-2); color: var(--text-primary); }
+.pill-btn:active { transform: scale(0.95); }
 
-/* ===== Fixed top bar (always visible, every route — stays put while
-   view content scrolls underneath it) ===== */
-.top-bar {
-  position: fixed; top: 0; left: 0; right: 0;
-  z-index: var(--z-header);
-  height: calc(var(--topbar-h) + env(safe-area-inset-top));
-  padding: env(safe-area-inset-top) 16px 0;
-  display: flex; align-items: center; justify-content: space-between;
-  background: var(--bg);
-  overflow: hidden;
-}
-.tb-actions { display: flex; gap: 4px; position: relative; z-index: 1; }
-.top-bar > .account-btn { position: relative; z-index: 1; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.icon-spin { animation: spin 1s linear infinite; }
 
-/* Tints the fixed top bar / bottom nav to match the currently playing
-   track's cover, while the bars themselves stay perfectly still. The
-   opposite treatment from #ambientBg on purpose: these are safe-area bars
-   the eye rests on constantly, so the tint here is heavily blurred, darkened
-   and lower-opacity — a quiet, mostly-static color hint rather than a vivid
-   one — while the center content area is where the vividness lives instead.
-   `overflow:hidden` on the fixed bar clips the oversized blur to its own
-   slim rectangle. */
-.bar-cover-tint {
-  position: absolute; inset: -60px;
-  z-index: 0;
-  background-size: cover; background-position: center;
-  filter: blur(70px) brightness(0.6);
-  opacity: 0;
-  transition: opacity 0.6s var(--ease), background-image 0.5s var(--ease);
-  pointer-events: none;
+/* =========================================================================
+   6. Route headers (home / search / library)
+   ========================================================================= */
+.home-header {
+  padding: 14px 20px 8px;
 }
-.bar-cover-tint.playing { opacity: 0.22; }
-.account-btn {
-  width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
-  background-color: #4527A0;
-  background-image: linear-gradient(135deg, #4527A0, #7C4DFF);
-  background-size: cover; background-position: center;
-  display: flex; align-items: center; justify-content: center;
+.hh-greeting {
+  font-size: 26px;
+  font-weight: 700;
   color: var(--text-primary);
-  transition: transform 0.1s var(--ease);
-}
-.account-btn:active { transform: scale(0.9); }
-.account-btn .ic { width: 18px; height: 18px; }
-
-/* ===== Per-route headers — normal document flow, scroll away under the
-   fixed top bar above; margin-top clears it (only one of these three is
-   ever visible at a time, so each needs its own clearance) ===== */
-.home-header, .search-header, .library-header {
-  position: relative;
-  z-index: var(--z-content);
-  margin-top: calc(var(--topbar-h) + env(safe-area-inset-top));
-  padding: 8px 16px 8px;
 }
 
-.hh-greeting { font-size: 15px; font-weight: 700; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
+.search-header {
+  position: sticky;
+  top: var(--topbar-total-h);
+  z-index: 550;
+  padding: 10px 16px 12px;
+  background: linear-gradient(to bottom, var(--bg-void) 60%, transparent);
+}
 .search-bar {
-  display: flex; align-items: center; gap: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 16px;
+  border-radius: var(--r-full);
   background: var(--surface-2);
-  border-radius: var(--r-lg);
-  padding: 10px 14px;
+  backdrop-filter: blur(var(--blur-soft));
+  -webkit-backdrop-filter: blur(var(--blur-soft));
+  border: 1px solid var(--glass-border);
 }
+.search-ic { width: 20px; height: 20px; color: var(--text-secondary); }
 .search-bar input {
-  flex: 1; background: none; border: none; outline: none;
-  /* 16px, not 15px: iOS Safari auto-zooms the whole page on focus for any
-     text input under 16px, regardless of the viewport meta tag — a real,
-     jarring "this is a webpage" moment the previous size was silently
-     triggering. */
-  font-size: 16px; color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  outline: none;
+  font-size: 15px;
+  color: var(--text-primary);
 }
-.search-bar input::placeholder { color: var(--text-secondary); }
-.search-ic { color: var(--text-secondary); }
-.mic-btn { width: 32px; height: 32px; flex-shrink: 0; }
+.search-bar input::placeholder { color: var(--text-tertiary); }
+.mic-btn { width: 34px; height: 34px; background: transparent; border: none; }
+.mic-btn:hover { background: var(--surface-1); }
 
 .voice-wave {
-  display: flex; align-items: center; justify-content: center; gap: 4px;
-  height: 28px; margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 14px 0 4px;
 }
 .voice-wave span {
-  width: 3px; height: 8px; border-radius: 2px; background: var(--accent);
-  animation: waveBounce 0.9s ease-in-out infinite;
+  width: 4px;
+  height: 22px;
+  border-radius: 3px;
+  background: var(--accent);
+  animation: waveBounce 0.85s ease-in-out infinite alternate;
 }
+.voice-wave span:nth-child(1) { animation-delay: 0s; }
 .voice-wave span:nth-child(2) { animation-delay: 0.1s; }
 .voice-wave span:nth-child(3) { animation-delay: 0.2s; }
 .voice-wave span:nth-child(4) { animation-delay: 0.3s; }
 .voice-wave span:nth-child(5) { animation-delay: 0.4s; }
-@keyframes waveBounce {
-  0%, 100% { height: 6px; }
-  50% { height: 22px; }
-}
+@keyframes waveBounce { from { transform: scaleY(0.25); } to { transform: scaleY(1); } }
 
 .search-history-dropdown {
-  position: absolute; left: 16px; right: 16px; top: calc(100% + 4px);
-  z-index: var(--z-header);
-  background: var(--surface-1);
-  border-radius: var(--r-md);
-  box-shadow: var(--shadow-lift);
-  padding: 10px;
-  max-height: 60vh; overflow-y: auto;
-  animation: slidePanelUp 0.2s var(--ease);
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: 100%;
+  margin-top: -4px;
+  z-index: 560;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 8px;
+  border-radius: var(--r-lg);
+  background: var(--surface-2);
+  backdrop-filter: blur(var(--blur-strong)) saturate(170%);
+  -webkit-backdrop-filter: blur(var(--blur-strong)) saturate(170%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-float);
+  animation: fadeSlideDown 0.2s ease both;
 }
+@keyframes fadeSlideDown { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
 .shd-head {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 4px 6px 10px; font-size: 13px; font-weight: 700; color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px 10px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-weight: 600;
 }
-.shd-clear { color: var(--accent); font-size: 12px; font-weight: 700; }
+.shd-clear {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+.shd-list { display: flex; flex-direction: column; gap: 2px; }
 .shd-row {
-  display: flex; align-items: center; gap: 10px;
-  padding: 6px; border-radius: var(--r-sm);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: var(--r-md);
+  transition: background 0.15s ease;
 }
-.shd-row-img { width: 40px; height: 40px; border-radius: var(--r-sm); object-fit: cover; background: var(--surface-2); flex-shrink: 0; }
-.shd-row-meta { flex: 1; min-width: 0; }
-.shd-row-title { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.shd-row-artist { font-size: 12px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* full 40x40 icon-btn size (not a compact override) — a smaller hit target
-   here was a real bug: on a real touchscreen, a tap aimed at this button
-   would often land on the row behind it instead, triggering "play + close"
-   rather than "delete", which read as "deleting just closes the dropdown
-   and does nothing" */
-.shd-row-remove .ic { width: 16px; height: 16px; }
+.shd-row:hover { background: var(--surface-1); }
+.shd-row-img { width: 40px; height: 40px; border-radius: var(--r-sm); object-fit: cover; flex-shrink: 0; }
+.shd-row-meta { min-width: 0; flex: 1; }
+.shd-row-title { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shd-row-artist { font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shd-row-remove { width: 32px; height: 32px; background: transparent; border: none; flex-shrink: 0; }
+.shd-row-remove:hover { background: var(--surface-1); }
 
-.lh-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.lh-title { font-size: 22px; font-weight: 800; letter-spacing: -0.3px; }
-.lh-actions { display: flex; gap: 4px; }
+.library-header {
+  position: sticky;
+  top: var(--topbar-total-h);
+  z-index: 550;
+  padding: 10px 20px 12px;
+  background: linear-gradient(to bottom, var(--bg-void) 65%, transparent);
+}
+.lh-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.lh-title { font-size: 21px; font-weight: 700; }
+.lh-actions { display: flex; gap: 6px; }
 
-.chip-row { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; }
-.chip-row::-webkit-scrollbar { display: none; }
+.chip-row {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
 .chip {
   flex-shrink: 0;
-  padding: 7px 14px;
-  border-radius: 999px;
-  background: var(--surface-2);
-  color: var(--text-primary);
-  font-size: 13px; font-weight: 600;
-  transition: background 0.15s var(--ease), transform 0.1s var(--ease);
+  padding: 8px 16px;
+  border-radius: var(--r-full);
+  background: var(--surface-1);
+  border: 1px solid var(--glass-border-soft);
+  color: var(--text-secondary);
+  font-size: 13.5px;
+  font-weight: 600;
+  transition: all 0.15s ease;
+  white-space: nowrap;
 }
-.chip:active { transform: scale(0.95); }
-.chip.active { background: linear-gradient(135deg, var(--accent-2), var(--accent)); color: #04120a; }
+.chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
 
-/* ===== Main views ===== */
+/* =========================================================================
+   7. Main views
+   ========================================================================= */
 #views {
   position: relative;
-  z-index: var(--z-content);
-  padding-bottom: calc(var(--mobile-nav-h) + var(--mini-player-h) + 24px);
-  overscroll-behavior-y: contain;
+  z-index: 1;
+  padding: 4px 16px var(--dock-reserve);
+  min-height: 60vh;
 }
-.view { padding: 8px 16px 16px; }
+body.has-now-playing #views { padding-bottom: var(--dock-reserve-playing); }
+.view { padding-top: 4px; }
 
 .section-title {
-  font-size: 20px; font-weight: 700; letter-spacing: -0.2px;
-  margin: 20px 0 12px;
+  font-size: 17px;
+  font-weight: 700;
+  margin: 22px 4px 12px;
 }
 
-/* Quick access grid */
+.empty-state {
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 14px;
+  padding: 36px 20px;
+  line-height: 1.6;
+}
+.empty-state-title {
+  color: var(--text-primary);
+  font-size: 17px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+/* =========================================================================
+   8. Cards & carousels (home carousels + library grid)
+   ========================================================================= */
+@keyframes cardIn {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.home-carousel {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding: 2px 2px 8px;
+  scroll-snap-type: x proximity;
+}
+.lib-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
+  gap: 16px;
+}
+
+.card {
+  flex-shrink: 0;
+  width: 136px;
+  text-align: left;
+  border-radius: var(--r-lg);
+  animation: cardIn 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+  scroll-snap-align: start;
+}
+.lib-grid .card { width: auto; }
+.card-img-wrap {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: var(--surface-1);
+  border: 1px solid var(--glass-border-soft);
+  box-shadow: var(--shadow-soft);
+}
+.card-img-wrap img { width: 100%; height: 100%; object-fit: cover; }
+.artist-card .card-img-wrap,
+.artist-card .card-img-wrap img { border-radius: 50%; }
+.card-body { padding: 10px 3px 0; }
+.card-title {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.card-sub {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+.card:active { transform: scale(0.97); }
+.card.now-playing-highlight .card-img-wrap { box-shadow: 0 0 0 2px var(--accent); }
+
+.liked-cover-tile {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  border-radius: var(--r-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  flex-shrink: 0;
+}
+.pl-detail-cover.liked-cover-tile, .card-img-wrap.liked-cover-tile { border-radius: var(--r-lg); width: 100%; height: 100%; }
+
+/* =========================================================================
+   9. Quick-access grid (home, top)
+   ========================================================================= */
 .quick-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
 }
 .quick-tile {
-  display: flex; align-items: center; gap: 10px;
-  background: var(--surface-2);
-  border-radius: var(--r-md);
-  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   height: 56px;
-  box-shadow: var(--shadow-rest), inset 0 0 0 1px var(--border-soft);
-  transition: transform 0.2s var(--ease-spring), box-shadow 0.2s var(--ease);
-}
-.quick-tile:active { transform: scale(0.97); }
-.quick-tile-img { width: 56px; height: 56px; object-fit: cover; flex-shrink: 0; background: var(--surface-1); }
-.quick-tile-title {
-  font-size: 13px; font-weight: 600;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  padding-right: 8px;
-}
-
-/* Horizontal carousels */
-.home-carousel {
-  display: flex; gap: 16px;
-  overflow-x: auto; scroll-snap-type: x proximity;
-  scrollbar-width: none; padding: 4px 2px 12px;
-}
-.home-carousel::-webkit-scrollbar { display: none; }
-
-.card {
-  flex-shrink: 0; width: 148px; scroll-snap-align: start;
   border-radius: var(--r-md);
-  /* was --surface-1 (#181818), only one shade above the page background
-     (#121212) — cards barely read as distinct tiles against the page,
-     relying on a soft shadow alone for definition. --surface-2 gives real
-     contrast without needing a border. */
-  background: var(--surface-2);
-  box-shadow: var(--shadow-rest), inset 0 0 0 1px var(--border-soft);
-  transition: transform 0.25s var(--ease-spring), box-shadow 0.25s var(--ease);
-  opacity: 0; animation: popIn 0.4s var(--ease) forwards;
+  background: var(--surface-1);
+  border: 1px solid var(--glass-border-soft);
+  overflow: hidden;
+  text-align: left;
+  transition: background 0.15s ease, transform 0.15s ease;
 }
-.card:active { transform: scale(0.96); }
-.card-img-wrap { width: 100%; aspect-ratio: 1; border-radius: var(--r-md) var(--r-md) 0 0; overflow: hidden; background: var(--surface-1); }
-.card-img-wrap img { width: 100%; height: 100%; object-fit: cover; }
-.card-body { padding: 10px; }
-.card-title {
-  font-size: 14px; font-weight: 600;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+.quick-tile:active { transform: scale(0.97); background: var(--surface-2); }
+.quick-tile.now-playing-highlight { background: var(--accent-soft); }
+.quick-tile-img {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  flex-shrink: 0;
+  border-radius: var(--r-sm) 0 0 var(--r-sm);
 }
-.card-sub {
-  font-size: 12px; color: var(--text-secondary); margin-top: 2px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-
-.artist-card .card-img-wrap { border-radius: 50%; }
-.artist-card .card-body { text-align: center; }
-
-@keyframes popIn {
-  from { opacity: 0; transform: translateY(14px) scale(0.96); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+.quick-tile-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  padding-right: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* Explore / category tiles (search view) */
+/* =========================================================================
+   10. Explore / categories grid (search)
+   ========================================================================= */
 .cat-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  gap: 14px;
+  margin-top: 6px;
 }
 .cat-tile {
   position: relative;
-  height: 100px;
-  border-radius: var(--r-md);
+  aspect-ratio: 2.1 / 1;
+  border-radius: var(--r-lg);
   overflow: hidden;
-  display: flex; align-items: flex-start; padding: 12px;
-  box-shadow: var(--shadow-rest), inset 0 0 0 1px var(--border-soft);
-  transition: transform 0.2s var(--ease-spring);
-  opacity: 0; animation: popIn 0.4s var(--ease) forwards;
+  padding: 14px;
+  text-align: left;
+  box-shadow: var(--shadow-soft);
 }
-.cat-tile:active { transform: scale(0.96); }
-.cat-tile-name { font-size: 15px; font-weight: 700; z-index: 1; }
+.cat-tile::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.16), transparent 55%);
+  pointer-events: none;
+}
+.cat-tile-name {
+  position: relative;
+  z-index: 1;
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.25);
+}
 .cat-tile-note {
-  position: absolute; right: 10px; bottom: 10px;
-  width: 32px; height: 32px;
-  opacity: 0.85;
-}
-.cat-tile-img {
-  position: absolute; right: -10px; bottom: -14px;
-  width: 74px; height: 74px; object-fit: cover;
-  border-radius: 8px;
-  transform: rotate(20deg);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
+  position: absolute;
+  bottom: -8px;
+  right: -8px;
+  width: 58px;
+  height: 58px;
+  transform: rotate(22deg);
 }
 
-/* Track rows (search results / recent / queue / lyrics track list) */
+/* =========================================================================
+   11. Track rows (search results, playlist detail, queue)
+   ========================================================================= */
 .track-row {
-  display: flex; align-items: center; gap: 12px;
-  padding: 8px 4px;
-  border-radius: var(--r-sm);
-  transition: background 0.15s var(--ease), box-shadow 0.2s var(--ease);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  border-radius: var(--r-md);
+  transition: background 0.15s ease;
 }
-.track-row-img { width: 48px; height: 48px; border-radius: var(--r-sm); object-fit: cover; background: var(--surface-2); flex-shrink: 0; }
-.track-row-meta { flex: 1; min-width: 0; }
+.track-row:hover { background: var(--surface-1); }
+.track-row.now-playing-highlight { background: var(--accent-soft); }
+.track-row-img { width: 48px; height: 48px; border-radius: var(--r-sm); object-fit: cover; flex-shrink: 0; }
+.track-row-meta { min-width: 0; flex: 1; }
 .track-row-title {
-  font-size: 15px; font-weight: 600;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.track-row-title.is-playing, .card-title.is-playing, .quick-tile-title.is-playing, .lib-row-title.is-playing { color: var(--accent); }
-/* Outlines (via inset box-shadow, not `outline` — outline ignores
-   border-radius in enough engines to look wrong on rounded cards/rows)
-   whichever track element currently matches the playing track, so it can
-   be spotted at a glance without opening the full player. */
-.track-row.now-playing-highlight, .lib-row.now-playing-highlight {
-  box-shadow: inset 0 0 0 2px var(--accent);
-  background: rgba(29, 185, 84, 0.08);
-}
-.card.now-playing-highlight, .quick-tile.now-playing-highlight {
-  box-shadow: var(--shadow-rest), inset 0 0 0 2px var(--accent);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .track-row-artist {
-  font-size: 13px; color: var(--text-secondary);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
 }
-.track-row-like { flex-shrink: 0; }
+.track-row-queue, .track-row-addpl, .track-row-like {
+  width: 36px;
+  height: 36px;
+  background: transparent;
+  border: none;
+  flex-shrink: 0;
+}
+.track-row-queue:hover, .track-row-addpl:hover, .track-row-like:hover { background: var(--surface-1); }
+.is-playing { color: var(--accent) !important; }
 
-/* Library list / grid */
-.lib-list { display: flex; flex-direction: column; }
+/* =========================================================================
+   12. Library list / rows
+   ========================================================================= */
+.lib-list { display: flex; flex-direction: column; gap: 4px; }
 .lib-row {
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 4px;
-  border-radius: var(--r-sm);
-  transition: background 0.15s var(--ease), box-shadow 0.2s var(--ease);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  border-radius: var(--r-md);
+  text-align: left;
+  transition: background 0.15s ease;
 }
-.lib-row-img { width: 52px; height: 52px; border-radius: var(--r-sm); object-fit: cover; background: var(--surface-2); flex-shrink: 0; }
-.lib-row-title { font-size: 15px; font-weight: 600; }
-.lib-row-sub { font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
+.lib-row:hover { background: var(--surface-1); }
+.lib-row.now-playing-highlight { background: var(--accent-soft); }
+.lib-row-img { width: 52px; height: 52px; border-radius: var(--r-sm); object-fit: cover; flex-shrink: 0; }
+.lib-row-title { font-size: 14.5px; font-weight: 600; }
+.lib-row-sub { font-size: 12.5px; color: var(--text-secondary); margin-top: 2px; }
 
-.lib-grid {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
-}
-
-/* deliberately no width/height here — this class is combined with a
-   differently-sized container in different contexts (quick-tile, lib-row,
-   grid card); each usage site is responsible for its own sizing so this
-   class can never win a specificity tie and override it (real bug found:
-   it used to set width/height:100%, which beat .lib-row-img's fixed 52x52
-   size, producing a squished/oversized rectangle in the library list). */
-.liked-cover-tile {
-  background: linear-gradient(135deg, #4527A0, #7C4DFF);
-  display: flex; align-items: center; justify-content: center;
-}
-.liked-cover-tile .ic { width: 44%; height: 44%; }
-
-.empty-state {
-  text-align: center; padding: 48px 16px; color: var(--text-secondary);
-}
-.empty-state-title { font-size: 16px; font-weight: 700; color: var(--text-primary); margin-bottom: 6px; }
-
-/* ===== Mini player ===== */
-/* Sits flush against the bottom nav (no gap) on purpose: a gap here used to
-   leave a thin strip where the page's own #121212 background (and the
-   ambient blur tinting it) showed through between the mini-player's
-   surface-2 grey and the nav's pure black, reading as an unwanted grey
-   divider line cutting across the bottom of the screen. */
+/* =========================================================================
+   13. Mini player
+   ========================================================================= */
 .mini-player {
   position: fixed;
-  left: 8px; right: 8px;
-  bottom: calc(var(--mobile-nav-h) + env(safe-area-inset-bottom));
-  z-index: var(--z-miniplayer);
+  left: calc(16px + var(--safe-l));
+  right: calc(16px + var(--safe-r));
+  bottom: var(--dock-mini-offset);
+  z-index: 410;
+  border-radius: var(--r-lg);
+  overflow: hidden;
   background: var(--surface-2);
-  border-radius: var(--r-md) var(--r-md) 0 0;
-  box-shadow: var(--shadow-lift), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  overflow: hidden;
-  animation: slideUpFade 0.3s var(--ease);
+  backdrop-filter: blur(var(--blur-strong)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--blur-strong)) saturate(180%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-float);
+  cursor: pointer;
+  transition: transform 0.2s ease;
 }
-/* Raised above regular content modals (playlist detail, queue, settings,
-   etc.) so it's still visible - un-dimmed - while one of those is open, per
-   a real-device report: starting a track from inside the playlist sheet
-   left literally no visible now-playing indicator, because the modal's
-   dark scrim (rgba(0,0,0,.6), covering the full viewport) was painting
-   over the mini-player underneath it. Only applied via JS (see
-   refreshMiniPlayerElevation()) when a regular modal is open AND the full
-   player is NOT — the full player must keep covering the mini-player as
-   before, and a modal opened from inside the full player (e.g. its own
-   Coda/Playlist buttons) should still render above both. */
-.mini-player.elevated { z-index: 110; }
-/* Paired with the elevation above: reserves room at the bottom of every
-   modal sheet once a track is loaded, so the elevated mini-player has
-   empty space to sit in rather than floating on top of the sheet's own
-   content (e.g. the last track row). */
-/* Real bug: this used to omit --mobile-nav-h entirely. The elevated
-   mini-player's actual on-screen position sits ABOVE the (visually hidden
-   but still occupying space) bottom nav — bottom: calc(--mobile-nav-h +
-   safe-area) — not flush with the screen edge, so reserving only
-   mini-player-h + safe-area undershot by a full nav-bar height, leaving the
-   mini-player's top ~20-30px overlapping real modal content instead of the
-   reserved empty padding. */
-body.has-now-playing .modal-overlay .modal {
-  padding-bottom: calc(env(safe-area-inset-bottom) + var(--mobile-nav-h) + var(--mini-player-h) + 20px);
-}
-@keyframes slideUpFade {
-  from { opacity: 0; transform: translateY(16px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-.mp-progress { height: 2px; background: rgba(255, 255, 255, 0.15); }
-.mp-progress-fill { height: 100%; width: 0%; background: var(--accent); transition: width 0.2s linear; }
-.mp-body { display: flex; align-items: center; gap: 10px; padding: 8px 10px; }
-.mp-cover { width: 40px; height: 40px; border-radius: var(--r-sm); overflow: hidden; background: var(--surface-1); flex-shrink: 0; position: relative; }
-.mp-cover img { width: 100%; height: 100%; object-fit: cover; }
-.mp-meta { flex: 1; min-width: 0; }
-.mp-title { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mp-artist { font-size: 12px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mp-like-btn, .mp-play-btn { flex-shrink: 0; }
-.mp-play-btn .ic { width: 26px; height: 26px; }
+.mini-player.elevated { z-index: 950; }
+.mini-player.buffering .mp-cover { opacity: 0.7; }
 
-/* ===== Bottom nav ===== */
-/* Solid, fully opaque black — no transparency/backdrop-filter, since any
-   translucency mixed with whatever scrolls underneath (album art, etc.)
-   was reported as reading like "half black, half gray" rather than one
-   solid band. Real-device (notched iPhone) testing showed a single flex
-   box with align-items:center still produced a visible seam between the
-   icon row and the safe-area strip below it — restructured into two
-   explicit sibling boxes (icon row + a dedicated safe-area spacer) that
-   both sit inside the SAME .bottom-nav parent, so the same solid
-   background AND the same .bar-cover-tint overlay (still absolutely
-   positioned/inset across the whole nav, unaffected by this inner split)
-   paint both zones identically — there is structurally no seam left to
-   render, rather than relying on centering math to avoid one. */
-.bottom-nav {
-  position: fixed; left: 0; right: 0; bottom: 0;
-  z-index: var(--z-nav);
-  display: flex; flex-direction: column;
-  /* was a deliberately different pure #000000 from the rest of the app's
-     #121212 (an older pass's choice, to read as fully opaque rather than
-     translucent) — matched to var(--bg) instead, since that intentional
-     difference is a strong, simpler explanation for a real, confirmed
-     "split into two colors" report than any internal layout gap: the nav
-     and everything else were, by design, never quite the same color. */
-  background: var(--bg);
+.mp-progress { height: 3px; background: rgba(255, 255, 255, 0.12); }
+.mp-progress-fill { height: 100%; width: 0%; background: var(--accent); transition: width 0.15s linear; }
+
+.mp-body {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+}
+.mp-cover {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--r-sm);
   overflow: hidden;
-  /* extends a few px higher than the icon row strictly needs, as a
-     defensive overlap into whatever sits behind this bar (#ambientBg) —
-     see the comment on .bottom-nav-row below for why this exists */
-  padding-top: 4px;
-}
-/* A few extra px of solid black + tint bleeding above the icon row itself,
-   overlapping into #ambientBg behind it. Root cause: #ambientBg was
-   deliberately made more vivid/saturated than this bar in an earlier pass
-   (an explicit design request, to contrast a colorful center against muted
-   bars) — any pre-existing sub-pixel rounding gap at the exact boundary
-   between the two, which was easy to miss when both layers looked similar,
-   became a plainly visible sharp line once that contrast was intentionally
-   increased. Confirmed as a real bug in our own CSS, not an iOS system
-   rendering characteristic (checked against other apps on the same real
-   device). This buffer makes such a gap structurally impossible rather
-   than chasing the exact rounding/timing cause. */
-.bottom-nav-row {
-  display: flex; align-items: center;
-  height: var(--mobile-nav-h);
-  position: relative; z-index: 1;
-}
-.bottom-nav-safe-spacer {
-  height: env(safe-area-inset-bottom);
   flex-shrink: 0;
-  position: relative; z-index: 1;
+  background: var(--surface-1);
+}
+.mp-cover img { width: 100%; height: 100%; object-fit: cover; }
+.mp-meta { min-width: 0; flex: 1; }
+.mp-title { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mp-artist { font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.mp-like-btn { width: 34px; height: 34px; background: transparent; border: none; flex-shrink: 0; }
+.mp-play-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.mp-play-btn .ic { width: 18px; height: 18px; }
+.mp-play-btn:active { transform: scale(0.92); }
+
+/* =========================================================================
+   14. Bottom nav — floating glass dock, deliberately inset from every edge
+   ========================================================================= */
+.bottom-nav {
+  position: fixed;
+  left: calc(16px + var(--safe-l));
+  right: calc(16px + var(--safe-r));
+  bottom: var(--dock-nav-offset);
+  z-index: 400;
+  height: var(--nav-h);
+  display: flex;
+  align-items: stretch;
+  border-radius: var(--r-full);
+  background: var(--surface-2);
+  backdrop-filter: blur(var(--blur-strong)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--blur-strong)) saturate(180%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-float);
 }
 .nav-item {
   flex: 1;
-  height: 100%;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
   color: var(--text-secondary);
-  position: relative; z-index: 1;
-  -webkit-tap-highlight-color: transparent;
-  touch-action: manipulation;
+  border-radius: var(--r-full);
+  transition: color 0.15s ease;
 }
-.nav-item.active { color: var(--text-primary); }
-/* Material-style "active indicator" pill behind the icon only (not the
-   label), matching the native Android/iOS tab-bar convention instead of a
-   plain color swap. z-index:-1 (not 0) so it paints behind the icon/label
-   spans despite being a positioned element — see the stacking-order note:
-   a positioned z-index:0 child would otherwise paint AFTER static in-flow
-   content, on top of it, not behind. .nav-item already has its own
-   position:relative + z-index:1, so this stays scoped to this button and
-   can never bleed above the rest of the nav bar. */
-.nav-item::before {
-  content: '';
-  position: absolute;
-  top: 6px; left: 50%; transform: translateX(-50%) scale(0.85);
-  width: 48px; height: 26px;
-  border-radius: 999px;
-  background: transparent;
-  opacity: 0;
-  transition: background 0.2s var(--ease), opacity 0.2s var(--ease), transform 0.2s var(--ease-spring);
-  z-index: -1;
-}
-.nav-item.active::before {
-  background: rgba(255, 255, 255, 0.1);
-  opacity: 1;
-  transform: translateX(-50%) scale(1);
-}
-.nav-icon { width: 20px; height: 20px; }
-.nav-icon svg { width: 100%; height: 100%; }
-.nav-label { font-size: 9px; font-weight: 600; letter-spacing: 0.1px; }
-.nav-item:active .nav-icon { animation: navPop 0.3s var(--ease-spring); }
-@keyframes navPop {
-  0% { transform: scale(1); }
-  40% { transform: scale(1.2); }
-  100% { transform: scale(1); }
-}
+.nav-item .nav-icon { width: 22px; height: 22px; }
+.nav-label { font-size: 10.5px; font-weight: 600; }
+.nav-item.active { color: var(--accent); }
+.nav-item:active { transform: scale(0.95); }
 
-/* ===== Play / pause buttons (shared micro-interaction) ===== */
-.mp-play-btn:active, .fp-play-btn:active, .np-play-btn:active {
-  transform: scale(0.9);
-}
-.fp-play-btn {
-  width: 64px; height: 64px; border-radius: 50%;
-  background: var(--text-primary); color: #000;
-  display: flex; align-items: center; justify-content: center;
-  box-shadow: var(--shadow-glow);
-  transition: transform 0.15s var(--ease-spring);
-}
-.fp-play-btn .ic { width: 28px; height: 28px; }
-
-/* ===== Heart / like burst ===== */
-.heart-burst-particle {
-  position: fixed;
-  width: 5px; height: 5px; border-radius: 50%;
-  background: var(--accent);
-  pointer-events: none;
-  z-index: var(--z-toast);
-  animation: burstOut 0.55s ease-out forwards;
-}
-@keyframes burstOut {
-  to { transform: translate(var(--dx), var(--dy)) scale(0); opacity: 0; }
-}
-
-/* ===== Shuffle active dot ===== */
-.fp-shuffle-btn.active, .np-shuffle-btn.active { color: var(--accent); position: relative; }
-.fp-shuffle-btn.active::after, .np-shuffle-btn.active::after {
-  content: ''; position: absolute; bottom: 2px; left: 50%;
-  width: 4px; height: 4px; border-radius: 50%; background: var(--accent);
-  transform: translateX(-50%);
-}
-
-/* ===== Full screen player ===== */
+/* =========================================================================
+   15. Full player
+   ========================================================================= */
 .full-player {
-  position: fixed; inset: 0;
-  z-index: var(--z-fullplayer);
-  /* 2026-07-26: a bright-magenta debug marker here (since reverted) proved
-     the reported "gray band at the bottom" is NOT a coverage gap in this
-     element or .fp-bg — every real pixel of .full-player painted magenta
-     correctly, except the strip right around the home-indicator, which
-     stayed solid black regardless. That strip is iOS's own reserved
-     home-indicator scrim, drawn by the OS on top of whatever the page
-     renders — not something any web page's CSS can reach or remove, and
-     the same treatment any native app gets. Nothing to fix here. */
-  background: var(--bg);
-  display: flex; flex-direction: column;
-  /* No bottom padding here anymore — .fp-deck (the scrubber/transport/
-     action-row wrapper below) now owns the safe-area clearance itself, as
-     part of its own "control shelf" background, so there is exactly one
-     place deciding how much empty space sits at the very bottom instead of
-     two paddings stacking (the old bug: safe-area+20px here PLUS
-     .fp-bottom-row's own +8px, ~62px of dead space on a notched phone). */
-  padding: env(safe-area-inset-top) 20px 0;
-  transform: translateY(0);
-  animation: fpSlideUp 0.4s var(--ease-spring);
-  /* promotes the whole panel (including the heavily-blurred .fp-bg child)
-     to its own compositor layer BEFORE the slide starts, so the animation
-     moves one pre-rendered bitmap instead of re-painting/re-blurring every
-     frame — without this, weaker mobile GPUs can visibly fall behind on
-     the blurred layer specifically, making the open animation look like it
-     renders in two separate stages */
-  will-change: transform;
+  position: fixed;
+  inset: 0;
+  z-index: 800;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, var(--bg-void-2), var(--bg-void));
+  animation: fpSlideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.full-player.closing { animation: fpSlideDown 0.25s var(--ease) forwards; }
+.full-player.closing { animation: fpSlideDown 0.25s ease forwards; }
 @keyframes fpSlideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
-@keyframes fpSlideDown { to { transform: translateY(100%); } }
+@keyframes fpSlideDown { from { transform: translateY(0); opacity: 1; } to { transform: translateY(100%); opacity: 1; } }
 
-/* Decoupled from the panel's open/close slide on purpose: a blurred layer
-   moving together with a transform animation forces the browser to
-   recomposite the blur every frame unless it's cheaply cached, and on
-   weaker phones that made the slide look like it rendered in two separate
-   stages. Fading this in via opacity AFTER the slide finishes (see the
-   `.visible` toggle in app.js) means the slide itself only ever has to
-   move sharp, cheap content — one single rigid motion. */
-/* vh/vw-based oversize instead of a percentage inset — percentages here
-   would resolve against .full-player's own padding box, which mixes in
-   env(safe-area-inset-*) values; a real-device report showed a sharp,
-   sudden dark-grey band at the very bottom of the full player specifically
-   where this backdrop should have reached but didn't, consistent with a
-   known class of WebKit quirk combining percentage-based layout with
-   safe-area env() padding on an ancestor. vh/vw units resolve against the
-   true viewport directly, sidestepping that containing-block math
-   entirely — checked directly via getBoundingClientRect: the element's own
-   box IS correctly sized/positioned to fully cover .full-player with
-   generous overhang, so the geometry itself isn't the problem (at least on
-   this engine) — see the z-index change below for the other real
-   candidate, a paint/compositing-layer issue rather than a sizing one. */
 .fp-bg {
   position: absolute;
-  top: -15vh; bottom: -15vh; left: -15vw; right: -15vw;
-  /* was z-index:-1. Negative z-index combined with will-change:transform
-     on the parent (see .full-player above) is a known category of WebKit
-     compositing bugs — some versions fail to promote a negative-z-index
-     child to the same layer as its will-change:transform ancestor, instead
-     clipping it to a smaller bounds than intended. Avoided entirely by
-     keeping every z-index in this component at 0-or-above: this layer
-     stays z-index:0 (paints first/behind), and every other direct child of
-     .full-player is explicitly promoted to z-index:1 (see the rule below)
-     so stacking is achieved without ever going negative. */
-  z-index: 0;
-  background-size: cover; background-position: center;
-  filter: blur(18px) brightness(0.55) saturate(1.3);
+  inset: -12%;
+  background-size: cover;
+  background-position: center;
+  filter: blur(75px) saturate(170%) brightness(0.5);
+  transform: scale(1.1);
   opacity: 0;
-  transition: opacity 0.25s var(--ease);
+  transition: opacity 0.5s ease;
+  pointer-events: none;
 }
-/* .fp-lyrics-panel is excluded here — it needs to keep its own
-   position:absolute for its slide-up-overlay behavior, not be forced to
-   position:relative; it already sits later in the DOM/source order than
-   every other child here, and gets its own explicit z-index further down,
-   so it still stacks above .fp-bg correctly without this rule's help. */
-.full-player > *:not(.fp-bg):not(.fp-lyrics-panel) { position: relative; z-index: 1; }
 .fp-bg.visible { opacity: 1; }
 
-.fp-drag-handle { display: flex; align-items: center; justify-content: space-between; padding: 12px 0 4px; position: relative; touch-action: none; }
+.fp-drag-handle {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: calc(var(--safe-t) + 14px) 8px 6px;
+  flex-shrink: 0;
+}
 .fp-handle-bar {
-  position: absolute; top: -2px; left: 50%; transform: translateX(-50%);
-  width: 36px; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.3);
+  position: absolute;
+  top: calc(var(--safe-t) + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 38px;
+  height: 4px;
+  border-radius: var(--r-full);
+  background: var(--glass-border-strong);
 }
-.fp-context { font-size: 12px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-secondary); }
+.fp-context {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
 
-.fp-cover-wrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 12px 0; min-height: 0; touch-action: none; }
+.fp-cover-wrap {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 24px;
+}
 .fp-cover {
-  width: min(78vw, 340px); aspect-ratio: 1;
-  border-radius: var(--r-lg);
-  background: var(--surface-2);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  width: auto;
+  height: min(40vh, 320px);
+  max-width: 100%;
+  max-height: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: var(--r-xl);
   overflow: hidden;
-  position: relative;
+  box-shadow: var(--shadow-float);
+  border: 1px solid var(--glass-border-soft);
 }
-.fp-cover img { width: 100%; height: 100%; object-fit: cover; }
+.fp-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
-/* Shown while a track's stream URL is being resolved (a real few-second
-   third-party network step, see startPlaybackFor in app.js) — without this
-   there's no visual difference between "loading" and "silently broken". */
-@keyframes bufferPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
-.mini-player.buffering .mp-cover,
-.full-player.buffering .fp-cover { animation: bufferPulse 1s ease-in-out infinite; }
-
-/* The play/pause button itself swaps to ICONS.spinner while buffering (see
-   updatePlayerUI in app.js) — this keyframe just spins whatever icon
-   carries the .icon-spin class. */
-@keyframes iconSpin { to { transform: rotate(360deg); } }
-.icon-spin { animation: iconSpin 0.8s linear infinite; transform-origin: center; }
-
-/* The "control shelf" — scrubber, transport, and the Coda/Playlist/Testo/
-   Condividi row all live inside this one shared surface instead of sitting
-   directly on the bare .fp-bg backdrop. Bleeds edge-to-edge with a negative
-   margin (cancelling .full-player's own 20px side padding) then re-applies
-   its own horizontal padding, so the shelf's background/border genuinely
-   spans the full width. Its own gradient already fades down to a flat,
-   opaque var(--bg) well before the safe-area strip begins, so that strip
-   now reads as "the same shelf's own bottom edge continuing to the true
-   screen edge" rather than an unexplained flat gap after the content ends
-   — this is the direct answer to "avoid a useless band down there": make
-   the zone visibly, deliberately part of this component instead of dead
-   space after it. (The literal home-indicator inset itself is still drawn
-   by iOS on top of any page, real app or web — that part was confirmed via
-   a live debug marker test and isn't something any page's CSS can reach.) */
-.fp-deck {
+.fp-info {
   position: relative;
-  margin: 0 -20px;
-  padding: 14px 20px calc(env(safe-area-inset-bottom) + 10px);
-  background: linear-gradient(to bottom,
-    rgba(255, 255, 255, 0.05) 0%,
-    rgba(255, 255, 255, 0.015) 45%,
-    var(--bg) 88%);
-  border-top: 1px solid var(--border-soft);
-  border-radius: var(--r-xl) var(--r-xl) 0 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 24px;
+  margin-bottom: 18px;
 }
-
-.fp-info { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; }
 .fp-titles { min-width: 0; }
-.fp-title { font-size: 20px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fp-artist { font-size: 14px; color: var(--text-secondary); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fp-title { font-size: 21px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fp-artist { font-size: 14px; color: var(--text-secondary); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fp-like-btn { flex-shrink: 0; }
 .fp-like-btn.liked { color: var(--accent); }
 
-.fp-scrubber { padding: 6px 0 4px; }
-/* The visible track is a thin 4px line, but a 4px-tall element is a very
-   unreliable real-finger touch target (the same "too-small hit target"
-   class of bug already found twice elsewhere in this project — see
-   .shd-row-remove). The track's actual box is grown to 32px so a touch
-   anywhere in that band starts a drag; the thin colored line is drawn via
-   ::before instead, kept vertically centered in the bigger invisible box. */
-.fp-seek-track {
-  position: relative; height: 32px;
-  display: flex; align-items: center;
-  touch-action: none;
+.fp-deck {
+  position: relative;
+  z-index: 1;
+  margin-top: auto;
+  padding: 18px 24px calc(var(--safe-b) + 18px);
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(var(--blur-strong)) saturate(170%);
+  -webkit-backdrop-filter: blur(var(--blur-strong)) saturate(170%);
+  border-top: 1px solid var(--glass-border-soft);
+  border-radius: var(--r-xl) var(--r-xl) 0 0;
 }
-.fp-seek-track::before {
-  content: ''; position: absolute; left: 0; right: 0; top: 50%;
-  height: 4px; border-radius: 2px; transform: translateY(-50%);
-  background: rgba(255, 255, 255, 0.25);
+
+.fp-scrubber { margin-bottom: 6px; }
+.fp-seek-track {
+  position: relative;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: rgba(255, 255, 255, 0.14);
+  cursor: pointer;
 }
 .fp-seek-fill {
-  position: absolute; left: 0; top: 50%; height: 4px; border-radius: 2px;
-  background: var(--accent); width: 0%; transform: translateY(-50%);
-  transition: width 0.5s linear;
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  width: 0%;
+  border-radius: var(--r-full);
+  background: var(--accent);
 }
 .fp-seek-handle {
-  position: absolute; top: 50%; width: 12px; height: 12px; border-radius: 50%;
-  background: var(--accent); transform: translate(-50%, -50%); left: 0%;
-  opacity: 0; transition: opacity 0.15s var(--ease), left 0.5s linear;
+  position: absolute;
+  top: 50%;
+  left: 0%;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
+  transform: translate(-50%, -50%) scale(0.9);
+  transition: transform 0.15s ease;
 }
-.fp-seek-track.seeking .fp-seek-handle { opacity: 1; transition: opacity 0.15s var(--ease); }
-.fp-seek-track.seeking .fp-seek-fill { transition: none; }
-.fp-time-row { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-secondary); margin-top: 8px; }
+.fp-seek-track.seeking .fp-seek-handle { transform: translate(-50%, -50%) scale(1.25); }
+.fp-time-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  margin-top: 8px;
+  font-variant-numeric: tabular-nums;
+}
 
-.fp-controls { display: flex; align-items: center; justify-content: space-between; padding: 14px 0 6px; }
-.fp-controls button { transition: transform 0.08s var(--ease); }
-.fp-controls button:active { transform: scale(0.85); transition-duration: 0.05s; }
+.fp-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 4px 6px;
+}
+.fp-shuffle-btn, .fp-repeat-btn {
+  width: 40px;
+  height: 40px;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+}
+.fp-shuffle-btn .ic, .fp-repeat-btn .ic { width: 19px; height: 19px; }
+.fp-shuffle-btn.active, .fp-repeat-btn.active { color: var(--accent); }
+.fp-prev-btn, .fp-next-btn {
+  width: 46px;
+  height: 46px;
+  color: var(--text-primary);
+  background: none;
+  border: none;
+}
 .fp-prev-btn .ic, .fp-next-btn .ic { width: 26px; height: 26px; }
-.fp-shuffle-btn .ic, .fp-repeat-btn .ic { width: 20px; height: 20px; }
+.fp-play-btn {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-btn);
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+.fp-play-btn .ic { width: 28px; height: 28px; }
+.fp-play-btn:active { transform: scale(0.94); }
 
-/* Horizontally scrollable rather than space-around: 4 pills (Coda/Playlist/
-   Testo/Condividi) no longer fit a narrow phone width at their natural
-   size - space-around just let the last one get clipped off the edge of
-   the screen entirely (confirmed on a real device: "Condividi" rendered
-   as "Condivid" with the final letter off-screen and untappable). Scrolling
-   keeps every pill fully reachable regardless of screen width, matching
-   the same pattern already used for .chip-row/.home-carousel. */
-/* Icon-only, evenly spread across the full width, no scrolling — user
-   explicitly asked twice for these to occupy the whole screen with no
-   side margins/fades/scroll-cut. A labeled pill row structurally can't fit
-   4 pills without either scrolling or shrinking (confirmed: this app's
-   layout is capped at 480px wide even on desktop, per the min-width:700px
-   media query below, so the same width constraint applies everywhere) —
-   dropping the text labels (kept as aria-label for accessibility) makes
-   each button small enough that all 4 comfortably fit with room to spare
-   on any real phone width, so there's nothing to scroll or fade at all. */
 .fp-bottom-row {
-  display: flex; align-items: center; justify-content: space-around;
-  padding: 4px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 12px;
+  margin-top: 4px;
+  border-top: 1px solid var(--glass-border-soft);
 }
 .fp-bottom-row .pill-btn {
-  width: 48px; height: 48px; padding: 0; border-radius: 50%;
-  /* Sits on the new .fp-deck glass shelf rather than the flat page
-     background, so a plain solid --surface-2 fill would look like a
-     mismatched flat chip; a translucent fill reads as part of the same
-     glass surface instead. */
-  background: rgba(255, 255, 255, 0.08);
-  box-shadow: inset 0 0 0 1px var(--border-soft);
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  background: none;
+  border: none;
 }
-.fp-bottom-row .pill-btn:active { background: rgba(255, 255, 255, 0.14); }
-.fp-bottom-row .pill-btn .ic { width: 20px; height: 20px; }
+.fp-bottom-row .pill-btn:hover { background: rgba(255, 255, 255, 0.08); }
 
 .fp-lyrics-panel {
-  position: absolute; inset: 0; top: auto; height: 70%;
+  position: absolute;
+  inset: 0;
   z-index: 2;
-  background: var(--surface-1);
-  border-radius: var(--r-xl) var(--r-xl) 0 0;
-  box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.5);
-  display: flex; flex-direction: column;
-  animation: slidePanelUp 0.3s var(--ease-spring);
-  padding: 16px 20px calc(env(safe-area-inset-bottom) + 16px);
+  display: flex;
+  flex-direction: column;
+  background: rgba(9, 9, 14, 0.86);
+  backdrop-filter: blur(var(--blur-strong)) saturate(170%);
+  -webkit-backdrop-filter: blur(var(--blur-strong)) saturate(170%);
+  animation: fadeSlideDown 0.2s ease both;
+  padding-top: var(--safe-t);
 }
-@keyframes slidePanelUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
-.fp-lyrics-head { display: flex; align-items: center; justify-content: space-between; font-weight: 700; margin-bottom: 12px; }
-.fp-lyrics-body { flex: 1; overflow-y: auto; overscroll-behavior-y: contain; font-size: 16px; line-height: 1.9; color: var(--text-secondary); white-space: pre-line; }
+.fp-lyrics-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 16px;
+  border-bottom: 1px solid var(--glass-border-soft);
+}
+.fp-lyrics-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px calc(var(--safe-b) + 24px);
+  font-size: 16px;
+  line-height: 1.9;
+  color: var(--text-secondary);
+  white-space: pre-line;
+}
 
-/* ===== Modals ===== */
+/* =========================================================================
+   16. Modal system (bottom sheets)
+   ========================================================================= */
 .modal-overlay {
-  position: fixed; inset: 0;
-  z-index: var(--z-modal);
-  background: rgba(0, 0, 0, 0.6);
-  display: flex; align-items: flex-end; justify-content: center;
-  animation: fadeIn 0.2s var(--ease);
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(4, 4, 8, 0.62);
+  animation: overlayIn 0.25s ease;
+  padding: 0 calc(10px + var(--safe-l)) 10px calc(10px + var(--safe-r));
 }
-@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-.modal {
-  position: relative;
-  width: 100%; max-width: 480px;
-  max-height: 82vh;
-  background: var(--surface-1);
-  border-radius: var(--r-xl) var(--r-xl) 0 0;
-  padding: 20px 20px calc(env(safe-area-inset-bottom) + 20px);
-  display: flex; flex-direction: column;
-  animation: slidePanelUp 0.3s var(--ease-spring);
-  /* same reasoning as .full-player's own will-change:transform — the
-     swipe-to-dismiss gesture (enableModalSwipeDismiss) sets an inline
-     transform on this element every pointermove, and without a compositor
-     layer promoted ahead of time, weaker phones can visibly lag behind a
-     dragging finger, especially for a modal with a long scrollable track
-     list underneath */
-  will-change: transform;
-}
-/* Grab-bar affordance for the swipe-to-dismiss gesture wired in
-   enableModalSwipeDismiss() — purely visual, the drag itself is bound to
-   the whole modal-head below it. */
-.modal::before {
-  content: ''; position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
-  width: 36px; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.25);
-}
-.modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; padding-top: 8px; cursor: grab; }
-.modal-title { font-size: 18px; font-weight: 700; }
-/* Hidden the same way as .chip-row/.home-carousel elsewhere in this app —
-   a real-device report showed the native scrollbar rendering right on top
-   of the track list's queue/like buttons at the row's edge, since the
-   list has no reserved right-hand gutter for it. */
-.modal-body { overflow-y: auto; overscroll-behavior-y: contain; scrollbar-width: none; }
-.modal-body::-webkit-scrollbar { display: none; }
-.modal-field {
-  width: 100%; background: var(--surface-2); border-radius: var(--r-md);
-  padding: 13px 14px; font-size: 16px; color: var(--text-primary); border: none; outline: none;
-  margin-bottom: 12px;
-}
-.modal-field::placeholder { color: var(--text-secondary); }
-.modal-btn {
-  width: 100%; padding: 14px; border-radius: 999px;
-  background: linear-gradient(135deg, var(--accent-2), var(--accent));
-  color: #04120a; font-weight: 700; font-size: 15px;
-  box-shadow: 0 6px 18px rgba(29, 185, 84, 0.28);
-  transition: transform 0.1s var(--ease);
-}
-.modal-btn:active { transform: scale(0.97); }
-.modal-hint { font-size: 12px; color: var(--text-secondary); margin-top: -6px; margin-bottom: 12px; line-height: 1.5; }
-.modal-hint-steps { margin: 8px 0 0; padding-left: 18px; }
-.modal-hint-steps li { margin-bottom: 4px; }
-.settings-section-title { font-size: 13px; font-weight: 700; color: var(--text-primary); margin-bottom: 8px; }
-.settings-section-title-spaced { margin-top: 20px; }
-#qualityChips { margin-bottom: 12px; }
+@keyframes overlayIn { from { opacity: 0; } to { opacity: 1; } }
 
-.pl-detail-hero { text-align: center; margin-bottom: 16px; }
-.pl-detail-cover-wrap { display: inline-block; }
-.pl-detail-cover {
-  width: 140px; height: 140px; border-radius: var(--r-md);
-  overflow: hidden; margin: 0 auto 12px;
-  box-shadow: var(--shadow-lift);
+.modal {
+  width: 100%;
+  max-width: 520px;
+  max-height: min(80vh, 680px);
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--r-xl);
+  background: var(--surface-2);
+  backdrop-filter: blur(var(--blur-strong)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--blur-strong)) saturate(180%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-float);
+  margin-bottom: var(--dock-reserve);
+  animation: modalIn 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
 }
+body.has-now-playing .modal { margin-bottom: var(--dock-reserve-playing); }
+@keyframes modalIn { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+
+.modal-head {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 18px 14px;
+  border-bottom: 1px solid var(--glass-border-soft);
+}
+.modal-head::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 36px;
+  height: 4px;
+  border-radius: var(--r-full);
+  background: var(--glass-border-strong);
+}
+.modal-title { font-size: 17px; font-weight: 700; }
+.modal-body {
+  padding: 16px 18px calc(18px + var(--safe-b));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.modal-field {
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  border: 1px solid var(--glass-border);
+  color: var(--text-primary);
+  font-size: 15px;
+  margin-bottom: 12px;
+  transition: border-color 0.15s ease;
+}
+.modal-field::placeholder { color: var(--text-tertiary); }
+.modal-field:focus { border-color: var(--accent); outline: none; }
+
+.modal-btn {
+  width: 100%;
+  padding: 15px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 15px;
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 10px;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+.modal-btn:active { transform: scale(0.98); }
+
+.modal-hint {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 14px;
+}
+.modal-hint-steps { margin: 8px 0 0; padding-left: 18px; }
+.modal-hint-steps li { margin-bottom: 5px; }
+.modal-hint-steps strong { color: var(--text-primary); }
+
+.settings-section-title {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 4px 0 8px;
+}
+.settings-section-title-spaced { margin-top: 26px; }
+
+/* playlist detail modal */
+.pl-detail-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  padding: 6px 0 18px;
+}
+.pl-detail-cover-wrap {
+  width: min(52vw, 220px);
+  aspect-ratio: 1 / 1;
+  border-radius: var(--r-xl);
+  overflow: hidden;
+  box-shadow: var(--shadow-float);
+  margin-bottom: 6px;
+  border: 1px solid var(--glass-border-soft);
+}
+.pl-detail-cover { width: 100%; height: 100%; }
 .pl-detail-cover img { width: 100%; height: 100%; object-fit: cover; }
 .pl-detail-name {
-  font-size: 19px; font-weight: 700; text-align: center;
-  padding: 4px 8px; border-radius: var(--r-sm);
+  font-size: 21px;
+  font-weight: 700;
   outline: none;
+  padding: 2px 10px;
+  border-radius: var(--r-sm);
 }
-.pl-detail-name[contenteditable="true"] { cursor: text; }
-.pl-detail-count { font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
-.pl-detail-actions { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; }
+.pl-detail-name[contenteditable="true"]:focus { background: var(--surface-1); box-shadow: 0 0 0 2px var(--accent); }
+.pl-detail-count { font-size: 13px; color: var(--text-secondary); }
+.pl-detail-actions { display: flex; gap: 10px; margin: 14px 0 18px; }
+.pl-detail-actions .modal-btn { margin-bottom: 0; }
+.pl-detail-actions .pill-btn { flex-shrink: 0; }
+.pl-detail-modal { max-height: min(85vh, 720px); }
 
+/* add-to-playlist modal */
+.atp-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 6px;
+  border-radius: var(--r-md);
+  text-align: left;
+  transition: background 0.15s ease;
+}
+.atp-row:hover { background: var(--surface-1); }
+.atp-row.atp-new { border-bottom: 1px solid var(--glass-border-soft); margin-bottom: 6px; padding-bottom: 16px; }
+.atp-row-check {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid var(--glass-border-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--accent-ink);
+  transition: all 0.15s ease;
+}
+.atp-row-check .ic { width: 13px; height: 13px; }
+.atp-row-check.checked { background: var(--accent); border-color: var(--accent); }
+.atp-new-icon { border-style: dashed; border-color: var(--accent); color: var(--accent); }
+.atp-row-name { font-size: 15px; }
+
+/* account modal */
 .profile-preview {
-  width: 72px; height: 72px; border-radius: 50%;
-  background: linear-gradient(135deg, #4527A0, #7C4DFF);
-  display: flex; align-items: center; justify-content: center;
-  margin: 0 auto 16px;
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  margin: 4px auto 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--glass-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   overflow: hidden;
+  color: var(--text-secondary);
 }
 .profile-preview img { width: 100%; height: 100%; object-fit: cover; }
 
-/* ===== Add-to-playlist rows ===== */
-.atp-row {
-  display: flex; align-items: center; gap: 12px; width: 100%;
-  padding: 12px 6px; border-radius: var(--r-sm); text-align: left;
-  transition: background 0.15s var(--ease);
-}
-.atp-row-check {
-  width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0;
-  border: 2px solid var(--text-secondary);
-  display: flex; align-items: center; justify-content: center;
-  color: #04120a;
-}
-.atp-row-check.checked { background: var(--accent); border-color: var(--accent); }
-.atp-row-check .ic { width: 14px; height: 14px; }
-.atp-row-name { font-size: 15px; font-weight: 600; }
-.atp-new .atp-new-icon { border-style: dashed; color: var(--text-secondary); }
-.atp-new .atp-row-name { color: var(--text-secondary); }
-
-.menu-popover {
-  position: absolute;
-  background: var(--surface-2);
-  border-radius: var(--r-md);
-  box-shadow: var(--shadow-lift);
-  padding: 6px;
-  z-index: var(--z-modal);
-  min-width: 180px;
-}
-.menu-item {
-  display: block; width: 100%; text-align: left;
-  padding: 10px 12px; border-radius: var(--r-sm); font-size: 14px;
-}
-/* ===== Toast ===== */
-.toast {
-  position: fixed; left: 50%; bottom: calc(var(--mobile-nav-h) + var(--mini-player-h) + 20px);
+/* =========================================================================
+   17. Toast
+   ========================================================================= */
+#toastRoot {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--dock-mini-offset) + var(--mini-h) + 16px);
   transform: translateX(-50%);
-  z-index: var(--z-toast);
-  background: var(--surface-2);
-  color: var(--text-primary);
-  padding: 10px 18px; border-radius: 999px;
-  font-size: 13px; font-weight: 600;
-  box-shadow: var(--shadow-lift);
-  animation: toastIn 0.25s var(--ease);
+  z-index: 1000;
+  pointer-events: none;
 }
-@keyframes toastIn { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
+body:not(.has-now-playing) #toastRoot { bottom: calc(var(--dock-nav-offset) + var(--nav-h) + 16px); }
+.toast {
+  padding: 12px 20px;
+  border-radius: var(--r-lg);
+  background: rgba(20, 20, 26, 0.85);
+  backdrop-filter: blur(var(--blur-strong)) saturate(170%);
+  -webkit-backdrop-filter: blur(var(--blur-strong)) saturate(170%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-float);
+  font-size: 13.5px;
+  font-weight: 600;
+  text-align: center;
+  max-width: calc(100vw - 64px);
+  width: max-content;
+  animation: toastIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes toastIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
-/* Real mouse-hover-only effects, gated so they can never apply to a touch
-   tap. Touch has no "pointer leaves the element" event, so a plain :hover
-   rule gets applied on tap and then stays stuck showing (a translucent
-   "halo") until something else happens to force a repaint — this was
-   reported as an annoying persistent glow on the heart button on a real
-   phone. `(hover: hover) and (pointer: fine)` is true only for actual
-   mouse/trackpad input, never for touch. */
-@media (hover: hover) and (pointer: fine) {
-  .icon-btn:hover { background: rgba(255, 255, 255, 0.08); }
-  .card:hover { transform: translateY(-4px); box-shadow: var(--shadow-lift), inset 0 0 0 1px var(--border-soft); }
-  .track-row:hover { background: rgba(255, 255, 255, 0.05); }
-  .lib-row:hover { background: rgba(255, 255, 255, 0.05); }
-  .fp-play-btn:hover { transform: scale(1.04); }
-  .fp-seek-track:hover .fp-seek-handle { opacity: 1; }
-  .menu-item:hover { background: rgba(255, 255, 255, 0.08); }
-  .atp-row:hover { background: rgba(255, 255, 255, 0.05); }
+/* =========================================================================
+   18. Heart-burst like animation (spawned directly on <body>)
+   ========================================================================= */
+.heart-burst-particle {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 1200;
+  transform: translate(-50%, -50%);
+  animation: heartBurst 0.6s ease-out forwards;
+}
+@keyframes heartBurst {
+  from { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  to { opacity: 0; transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(0.25); }
 }
 
-/* ===== Desktop (kept simple: centered mobile-style column, per app's native-PWA mobile-first scope) ===== */
-@media (min-width: 700px) {
-  #app { max-width: 480px; margin: 0 auto; box-shadow: 0 0 60px rgba(0, 0, 0, 0.6); min-height: 100vh; }
-  /* centered via left/width math (not transform:translateX) so it doesn't fight the
-     translateY() open/close animation already applied to .full-player's transform */
-  .mini-player, .bottom-nav, .full-player { left: calc(50% - 240px); right: auto; width: 480px; }
-  .mini-player { width: calc(480px - 16px); }
+/* =========================================================================
+   19. Reduced motion
+   ========================================================================= */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .icon-spin { animation-duration: 1s !important; animation-iteration-count: infinite !important; }
+}
+
+/* =========================================================================
+   20. Wider viewports — contain the app + its ambient glow in a centred
+   "device" column instead of stretching glass bars across a full desktop
+   window.
+   ========================================================================= */
+@media (min-width: 720px) {
+  body { display: flex; justify-content: center; }
+  #app {
+    max-width: var(--app-max-w);
+    width: 100%;
+    transform: translateZ(0);
+    border-left: 1px solid var(--glass-border-soft);
+    border-right: 1px solid var(--glass-border-soft);
+    box-shadow: 0 0 140px rgba(0, 0, 0, 0.6);
+  }
 }

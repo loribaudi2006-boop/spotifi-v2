@@ -1,4 +1,4 @@
-const CACHE_NAME = 'spotifi-shell-v30';
+const CACHE_NAME = 'spotifi-shell-v39';
 
 const APP_SHELL = [
   './',

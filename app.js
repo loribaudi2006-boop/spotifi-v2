@@ -1627,6 +1627,9 @@ function openFullPlayer() {
   // fade the blurred backdrop in only once the (cheap, sharp-content-only)
   // slide-up has actually finished — see the .fp-bg CSS comment
   setTimeout(() => $('#fpBg').classList.add('visible'), 400);
+  // real-device report: the deck/backdrop can paint as a flat black band
+  // until the screen is tapped — see nudgeSafeAreaLayout()
+  setTimeout(nudgeSafeAreaLayout, 420);
   refreshMiniPlayerElevation();
 }
 function closeFullPlayer() {
@@ -1883,6 +1886,32 @@ function fixStandaloneViewport() {
   if (meta) meta.setAttribute('content', `width=${window.innerWidth}, initial-scale=1, viewport-fit=cover, user-scalable=no`);
 }
 
+/* Real-device report: the full player's bottom deck (and potentially the
+   safe-area-based bottom nav/mini-player) can paint incorrectly on first
+   load/open — fixable by simply tapping the screen. This matches a known
+   iOS Safari class of bug where env(safe-area-inset-*) values and layers
+   promoted via will-change aren't correctly (re)applied until the page has
+   had a real layout/compositing pass forced on it, which a genuine user
+   interaction happens to trigger. Toggling will-change off/on forces the
+   browser to redo that pass for the given element — done automatically
+   here (on boot and on full-player open) plus once on the user's very
+   first real tap, so the fix lands on their first natural interaction
+   instead of requiring a deliberate double-tap. */
+function forceReflow(el) {
+  if (!el) return;
+  const prev = el.style.willChange;
+  el.style.willChange = 'auto';
+  void el.offsetHeight;
+  el.style.willChange = prev || '';
+}
+function nudgeSafeAreaLayout() {
+  forceReflow($('.full-player'));
+  forceReflow($('.fp-deck'));
+  forceReflow($('.bottom-nav'));
+  forceReflow($('.mini-player'));
+  window.dispatchEvent(new Event('resize'));
+}
+
 function boot() {
   fixStandaloneViewport();
   updateGreeting();
@@ -1896,6 +1925,8 @@ function boot() {
   setupAudioEngine();
   setupMiniPlayerElevationObserver();
   goTo('home');
+  requestAnimationFrame(() => requestAnimationFrame(nudgeSafeAreaLayout));
+  document.addEventListener('pointerdown', nudgeSafeAreaLayout, { once: true });
 
   // A newly-activated service worker (see sw.js's skipWaiting/clients.claim)
   // now auto-reloads the page instead of silently taking control in the
