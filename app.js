@@ -50,6 +50,7 @@ const ICONS = {
   sparkle: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.5 5.5L19 9l-5.5 1.5L12 16l-1.5-5.5L5 9l5.5-1.5z"/><path d="M19 15l.7 2.3L22 18l-2.3.7L19 21l-.7-2.3L16 18l2.3-.7z"/></svg>`,
   playlistAdd: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h11"/><path d="M3 10h8"/><path d="M3 15h5"/><circle cx="18" cy="16" r="4.5"/><line x1="18" y1="14.3" x2="18" y2="17.7"/><line x1="16.3" y1="16" x2="19.7" y2="16"/></svg>`,
   check: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 9.5 18 20 6"/></svg>`,
+  download: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4.5 19h15"/></svg>`,
 };
 
 /* =========================================================
@@ -70,6 +71,7 @@ function defaultDB() {
     liked: [],
     recentTracks: [],
     playlists: [],
+    offlineTracks: [],
     libraryLayout: 'list',
     libraryFilter: 'all',
     profile: { name: '', photoDataUrl: null },
@@ -77,6 +79,106 @@ function defaultDB() {
 }
 let db = loadDB();
 function saveDB() { localStorage.setItem(DB_KEY, JSON.stringify(db)); }
+
+/* =========================================================
+   Offline audio storage — actual audio bytes live in IndexedDB
+   (localStorage's ~5-10MB quota would choke on more than a song or
+   two), keyed by track id. Track metadata (title/artist/thumb) stays
+   in the regular localStorage-backed db.offlineTracks, same as every
+   other track list in the app — only the heavy binary payload gets
+   the separate store.
+   ========================================================= */
+const OFFLINE_DB_NAME = 'spotifi_offline_v1';
+const OFFLINE_STORE = 'audio';
+let offlineDbPromise = null;
+function openOfflineDb() {
+  if (offlineDbPromise) return offlineDbPromise;
+  offlineDbPromise = new Promise((resolve, reject) => {
+    if (!('indexedDB' in window)) { reject(new Error('IndexedDB non supportato')); return; }
+    const req = indexedDB.open(OFFLINE_DB_NAME, 1);
+    req.onupgradeneeded = () => { req.result.createObjectStore(OFFLINE_STORE); };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  return offlineDbPromise;
+}
+function offlineBlobSet(id, blob) {
+  return openOfflineDb().then((idb) => new Promise((resolve, reject) => {
+    const tx = idb.transaction(OFFLINE_STORE, 'readwrite');
+    tx.objectStore(OFFLINE_STORE).put(blob, id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  }));
+}
+function offlineBlobGet(id) {
+  return openOfflineDb().then((idb) => new Promise((resolve, reject) => {
+    const tx = idb.transaction(OFFLINE_STORE, 'readonly');
+    const req = tx.objectStore(OFFLINE_STORE).get(id);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  }));
+}
+function offlineBlobDelete(id) {
+  return openOfflineDb().then((idb) => new Promise((resolve, reject) => {
+    const tx = idb.transaction(OFFLINE_STORE, 'readwrite');
+    tx.objectStore(OFFLINE_STORE).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  }));
+}
+
+function isOffline(id) { return db.offlineTracks.some((t) => t.id === id); }
+const downloadingIds = new Set();
+// Resolves to the locally-stored Blob for a downloaded track, or null if
+// it isn't downloaded (or the read fails) — checked first, synchronously
+// cheap via isOffline(), before ever touching IndexedDB.
+async function getOfflineBlob(id) {
+  if (!isOffline(id)) return null;
+  try { return await offlineBlobGet(id); } catch (e) { return null; }
+}
+function refreshDownloadUI(id) {
+  const downloading = downloadingIds.has(id);
+  const downloaded = isOffline(id);
+  $$(`[data-dl-id="${CSS.escape(id)}"]`).forEach((btn) => {
+    setIcon(btn.querySelector('.ic') || btn, downloading ? ICONS.spinner : downloaded ? ICONS.check : ICONS.download);
+    btn.classList.toggle('downloading', downloading);
+    btn.classList.toggle('downloaded', downloaded);
+    btn.style.color = downloaded ? 'var(--accent)' : '';
+    btn.setAttribute('aria-label', downloaded ? 'Rimuovi download' : 'Scarica per l’ascolto offline');
+  });
+}
+async function downloadTrackOffline(track) {
+  if (downloadingIds.has(track.id)) return;
+  if (isOffline(track.id)) { removeOfflineTrack(track.id); return; }
+  downloadingIds.add(track.id);
+  refreshDownloadUI(track.id);
+  try {
+    const url = (await takePrefetchedStreamUrl(track)) || (await resolveStreamUrl(track.id));
+    if (!url) throw new Error('URL non risolto');
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('fetch fallita');
+    const blob = await res.blob();
+    await offlineBlobSet(track.id, blob);
+    db.offlineTracks = db.offlineTracks.filter((t) => t.id !== track.id);
+    db.offlineTracks.unshift({ id: track.id, title: track.title, artist: track.artist, thumb: track.thumb, downloadedAt: Date.now() });
+    saveDB();
+    showToast('Brano salvato per l’ascolto offline');
+    if (currentRoute === 'library') renderLibrary();
+  } catch (e) {
+    showToast('Impossibile scaricare il brano, riprova');
+  } finally {
+    downloadingIds.delete(track.id);
+    refreshDownloadUI(track.id);
+  }
+}
+async function removeOfflineTrack(id) {
+  db.offlineTracks = db.offlineTracks.filter((t) => t.id !== id);
+  saveDB();
+  refreshDownloadUI(id);
+  showToast('Rimosso dai brani offline');
+  if (currentRoute === 'library') renderLibrary();
+  try { await offlineBlobDelete(id); } catch (e) { /* not fatal — metadata already gone */ }
+}
 
 /* =========================================================
    Player state
@@ -430,12 +532,17 @@ async function runSearch(query) {
 
 function trackRowHtml(t) {
   const liked = db.liked.some((x) => x.id === t.id);
+  const downloaded = isOffline(t.id);
+  const downloading = downloadingIds.has(t.id);
   return `<div class="track-row" data-track-id="${t.id}">
     <img class="track-row-img" src="${t.thumb}" alt="" loading="lazy" />
     <div class="track-row-meta">
       <div class="track-row-title">${escapeHtml(t.title)}</div>
       <div class="track-row-artist">${escapeHtml(t.artist)}</div>
     </div>
+    <button type="button" class="icon-btn track-row-download ${downloaded ? 'downloaded' : ''} ${downloading ? 'downloading' : ''}" data-dl-id="${t.id}" aria-label="${downloaded ? 'Rimuovi download' : 'Scarica per l’ascolto offline'}" style="${downloaded ? 'color:var(--accent)' : ''}">
+      <span class="ic">${downloading ? ICONS.spinner : downloaded ? ICONS.check : ICONS.download}</span>
+    </button>
     <button type="button" class="icon-btn track-row-queue" data-queue-id="${t.id}" aria-label="Aggiungi alla coda">
       <span class="ic">${ICONS.plus}</span>
     </button>
@@ -450,7 +557,7 @@ function trackRowHtml(t) {
 function wireTrackRows(container, list) {
   $$('.track-row', container).forEach((row) => {
     row.addEventListener('click', (e) => {
-      if (e.target.closest('.track-row-like') || e.target.closest('.track-row-queue') || e.target.closest('.track-row-addpl')) return;
+      if (e.target.closest('.track-row-like') || e.target.closest('.track-row-queue') || e.target.closest('.track-row-addpl') || e.target.closest('.track-row-download')) return;
       const id = row.dataset.trackId;
       const idx = list.findIndex((t) => t.id === id);
       if (idx >= 0) playQueue(list, idx);
@@ -461,6 +568,13 @@ function wireTrackRows(container, list) {
       e.stopPropagation();
       const t = list.find((x) => x.id === btn.dataset.likeId);
       if (t) toggleLike(t, btn);
+    });
+  });
+  $$('.track-row-download', container).forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const t = list.find((x) => x.id === btn.dataset.dlId);
+      if (t) downloadTrackOffline(t);
     });
   });
   $$('.track-row-queue', container).forEach((btn) => {
@@ -529,6 +643,9 @@ function renderLibrary() {
     if (db.liked.length) rows.push({ type: 'liked' });
     db.playlists.forEach((p) => rows.push({ type: 'playlist', playlist: p }));
   }
+  if (filter === 'all' || filter === 'offline') {
+    rows.push({ type: 'offline' });
+  }
   let artistRows = [];
   if (filter === 'all' || filter === 'artists') {
     const seen = new Set();
@@ -555,6 +672,12 @@ function libRowHtml(r) {
       <div><div class="lib-row-title">Brani che ti piacciono</div><div class="lib-row-sub">${db.liked.length} brani</div></div>
     </button>`;
   }
+  if (r.type === 'offline') {
+    return `<button type="button" class="lib-row" data-lib-type="offline">
+      <div class="lib-row-img offline-cover-tile"><span class="ic" style="width:20px;height:20px">${ICONS.download}</span></div>
+      <div><div class="lib-row-title">Offline</div><div class="lib-row-sub">${db.offlineTracks.length} brani scaricati</div></div>
+    </button>`;
+  }
   if (r.type === 'playlist') {
     const cover = r.playlist.coverDataUrl
       ? `<img class="lib-row-img" src="${r.playlist.coverDataUrl}" alt="" />`
@@ -576,6 +699,12 @@ function libGridItemHtml(r) {
       <div class="card-body"><div class="card-title">Brani che ti piacciono</div><div class="card-sub">${db.liked.length} brani</div></div>
     </button>`;
   }
+  if (r.type === 'offline') {
+    return `<button type="button" class="card" data-lib-type="offline" style="animation:none;opacity:1">
+      <div class="card-img-wrap offline-cover-tile"><span class="ic" style="width:36%;height:36%">${ICONS.download}</span></div>
+      <div class="card-body"><div class="card-title">Offline</div><div class="card-sub">${db.offlineTracks.length} brani</div></div>
+    </button>`;
+  }
   if (r.type === 'playlist') {
     const cover = r.playlist.coverDataUrl
       ? `<img src="${r.playlist.coverDataUrl}" alt="" />`
@@ -592,6 +721,7 @@ function libGridItemHtml(r) {
 }
 function wireLibraryItems(root, all) {
   $$('[data-lib-type="liked"]', root).forEach((el) => el.addEventListener('click', () => openPlaylistDetail('liked')));
+  $$('[data-lib-type="offline"]', root).forEach((el) => el.addEventListener('click', () => openPlaylistDetail('offline')));
   $$('[data-lib-type="artist"]', root).forEach((el) => el.addEventListener('click', () => {
     const id = el.dataset.trackId;
     const item = all.find((r) => r.type === 'artist' && r.track.id === id);
@@ -600,7 +730,7 @@ function wireLibraryItems(root, all) {
   $$('[data-lib-type="playlist"]', root).forEach((el) => el.addEventListener('click', () => openPlaylistDetail('playlist', el.dataset.playlistId)));
 }
 function findKnownTrack(id) {
-  return db.liked.find((t) => t.id === id) || db.recentTracks.find((t) => t.id === id) || null;
+  return db.liked.find((t) => t.id === id) || db.recentTracks.find((t) => t.id === id) || db.offlineTracks.find((t) => t.id === id) || null;
 }
 
 /* Generic swipe-down-to-dismiss for the shared .modal bottom-sheet
@@ -666,12 +796,14 @@ function enableModalSwipeDismiss(closeFn) {
    ========================================================= */
 function openPlaylistDetail(kind, playlistId) {
   const isLiked = kind === 'liked';
-  const pl = isLiked ? null : db.playlists.find((p) => p.id === playlistId);
-  if (!isLiked && !pl) return;
-  const name = isLiked ? 'Brani che ti piacciono' : pl.name;
-  const tracks = isLiked ? db.liked : pl.trackIds.map((id) => findKnownTrack(id)).filter(Boolean);
+  const isOfflineKind = kind === 'offline';
+  const pl = (isLiked || isOfflineKind) ? null : db.playlists.find((p) => p.id === playlistId);
+  if (!isLiked && !isOfflineKind && !pl) return;
+  const name = isOfflineKind ? 'Offline' : isLiked ? 'Brani che ti piacciono' : pl.name;
+  const tracks = isOfflineKind ? db.offlineTracks : isLiked ? db.liked : pl.trackIds.map((id) => findKnownTrack(id)).filter(Boolean);
 
   function coverHtml() {
+    if (isOfflineKind) return `<div class="pl-detail-cover offline-cover-tile"><span class="ic" style="width:40%;height:40%">${ICONS.download}</span></div>`;
     if (isLiked) return `<div class="pl-detail-cover liked-cover-tile"><span class="ic" style="width:40%;height:40%">${ICONS.heart(true)}</span></div>`;
     if (pl.coverDataUrl) return `<div class="pl-detail-cover"><img src="${pl.coverDataUrl}" alt="" /></div>`;
     return `<div class="pl-detail-cover" style="display:flex;align-items:center;justify-content:center;background:var(--surface-2)"><span class="ic" style="color:var(--text-secondary)">${ICONS.library(false)}</span></div>`;
@@ -681,21 +813,21 @@ function openPlaylistDetail(kind, playlistId) {
     <div class="modal-overlay" id="plDetailOverlay">
       <div class="modal pl-detail-modal">
         <div class="modal-head">
-          <span class="modal-title">${isLiked ? 'Playlist' : 'Modifica playlist'}</span>
+          <span class="modal-title">${isOfflineKind ? 'Offline' : isLiked ? 'Playlist' : 'Modifica playlist'}</span>
           <button type="button" class="icon-btn" id="plDetailCloseBtn"><span class="ic">${ICONS.close}</span></button>
         </div>
         <div class="modal-body">
           <div class="pl-detail-hero">
             <div class="pl-detail-cover-wrap" id="plCoverWrap">${coverHtml()}</div>
-            <div class="pl-detail-name" id="plDetailName" ${isLiked ? '' : 'contenteditable="true"'}>${escapeHtml(name)}</div>
+            <div class="pl-detail-name" id="plDetailName" ${(isLiked || isOfflineKind) ? '' : 'contenteditable="true"'}>${escapeHtml(name)}</div>
             <div class="pl-detail-count">${tracks.length} brani</div>
-            ${isLiked ? '' : '<input type="file" accept="image/*" id="plCoverInput" class="hidden" />'}
+            ${(isLiked || isOfflineKind) ? '' : '<input type="file" accept="image/*" id="plCoverInput" class="hidden" />'}
           </div>
           <div class="pl-detail-actions">
             <button type="button" class="modal-btn" id="plPlayBtn" style="width:auto;flex:1">Riproduci</button>
             <button type="button" class="pill-btn" id="plShuffleBtn"><span class="ic"></span><span>Casuale</span></button>
           </div>
-          <div id="plDetailBody">${tracks.length ? tracks.map((t) => trackRowHtml(t)).join('') : '<div class="empty-state">Nessun brano qui</div>'}</div>
+          <div id="plDetailBody">${tracks.length ? tracks.map((t) => trackRowHtml(t)).join('') : `<div class="empty-state">${isOfflineKind ? 'Nessun brano scaricato ancora — tocca l’icona di download su un brano per salvarlo qui.' : 'Nessun brano qui'}</div>`}</div>
         </div>
       </div>
     </div>`;
@@ -716,18 +848,18 @@ function openPlaylistDetail(kind, playlistId) {
   // the app) — dismissing is still always available via the X button, tap
   // outside, or the swipe-down gesture just wired in.
   $('#plPlayBtn').addEventListener('click', () => {
-    if (!tracks.length) { showToast('Playlist vuota'); return; }
+    if (!tracks.length) { showToast(isOfflineKind ? 'Nessun brano scaricato' : 'Playlist vuota'); return; }
     player.shuffle = false;
     playQueue(tracks, 0); // updatePlayerUI() (called from playIndex) refreshes the highlight
   });
   $('#plShuffleBtn').addEventListener('click', () => {
-    if (!tracks.length) { showToast('Playlist vuota'); return; }
+    if (!tracks.length) { showToast(isOfflineKind ? 'Nessun brano scaricato' : 'Playlist vuota'); return; }
     player.shuffle = true;
     $$('.fp-shuffle-btn, .np-shuffle-btn').forEach((btn) => btn.classList.add('active'));
     playQueue(tracks, Math.floor(Math.random() * tracks.length));
   });
 
-  if (!isLiked) {
+  if (!isLiked && !isOfflineKind) {
     $('#plCoverWrap').addEventListener('click', () => $('#plCoverInput').click());
     $('#plCoverInput').addEventListener('change', async (e) => {
       const file = e.target.files[0];
@@ -783,7 +915,11 @@ function setupLibraryHeader() {
 /* =========================================================
    Like / heart with particle burst
    ========================================================= */
+const likeLockedIds = new Set();
 function toggleLike(track, sourceBtn) {
+  if (likeLockedIds.has(track.id)) return;
+  likeLockedIds.add(track.id);
+  setTimeout(() => likeLockedIds.delete(track.id), 200);
   const idx = db.liked.findIndex((t) => t.id === track.id);
   const wasLiked = idx >= 0;
   if (wasLiked) db.liked.splice(idx, 1); else db.liked.unshift(track);
@@ -1212,6 +1348,31 @@ function releaseCurrentBlobUrl() {
   if (currentBlobUrl) { URL.revokeObjectURL(currentBlobUrl); currentBlobUrl = null; }
 }
 
+// Short-lived in-memory cache of fully-downloaded audio blobs for tracks
+// actually played this session (NOT proactively fetched — only ever
+// populated as a side effect of real playback, so this never adds extra
+// load on the shared resolve/cobalt service). Makes replaying something
+// from the last few minutes (prev/repeat/tapping a recent track again)
+// start instantly with zero network round-trip, on top of the existing
+// next-in-queue prefetch and the new offline-download fast path below.
+const recentBlobCache = new Map(); // id -> { blob, ts }
+const RECENT_BLOB_CACHE_MAX = 6;
+const RECENT_BLOB_MAX_AGE_MS = 5 * 60 * 1000;
+function cacheRecentBlob(id, blob) {
+  recentBlobCache.set(id, { blob, ts: Date.now() });
+  if (recentBlobCache.size > RECENT_BLOB_CACHE_MAX) {
+    let oldestId = null, oldestTs = Infinity;
+    recentBlobCache.forEach((entry, key) => { if (entry.ts < oldestTs) { oldestTs = entry.ts; oldestId = key; } });
+    if (oldestId) recentBlobCache.delete(oldestId);
+  }
+}
+function getRecentBlob(id) {
+  const entry = recentBlobCache.get(id);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > RECENT_BLOB_MAX_AGE_MS) { recentBlobCache.delete(id); return null; }
+  return entry.blob;
+}
+
 // audioEl.removeAttribute('src'); audioEl.load() (used to reset the element
 // before loading a new track) can itself fire a spurious 'error' event on
 // some browsers, since there's momentarily no supported source — must not
@@ -1277,6 +1438,23 @@ async function startPlaybackFor(track, isRetry) {
   audioEl.load();
   setBuffering(true);
 
+  // Fast paths, both instant and both skip the network resolve entirely:
+  // a track downloaded for offline listening plays straight from its local
+  // copy, and one played in roughly the last few minutes plays from the
+  // in-memory cache populated by upgradeToSeekableBlob below.
+  const offlineBlob = await getOfflineBlob(track.id);
+  if (myToken !== playbackToken) return; // a different track was picked meanwhile
+  const fastBlob = offlineBlob || getRecentBlob(track.id);
+  if (fastBlob) {
+    suppressNextAudioError = false;
+    const objUrl = URL.createObjectURL(fastBlob);
+    currentBlobUrl = objUrl;
+    audioEl.src = objUrl;
+    try { await audioEl.play(); } catch (e) { /* 'pause'/'error' listeners reflect whatever actually happened */ }
+    setBuffering(false);
+    return;
+  }
+
   // A prefetched URL (queued up while the previous track was playing, see
   // schedulePrefetchNext) skips the slow resolve step entirely — this is
   // what makes playing straight through a queue feel instant despite
@@ -1289,12 +1467,12 @@ async function startPlaybackFor(track, isRetry) {
   audioEl.src = streamUrl;
   try { await audioEl.play(); } catch (e) { /* 'pause'/'error' listeners reflect whatever actually happened */ }
   setBuffering(false);
-  upgradeToSeekableBlob(streamUrl, myToken);
+  upgradeToSeekableBlob(streamUrl, myToken, track.id);
   // NOT scheduled here — see the 'timeupdate' listener in setupAudioEngine,
   // which fires this once the track is actually nearing its end instead.
 }
 
-async function upgradeToSeekableBlob(streamUrl, myToken) {
+async function upgradeToSeekableBlob(streamUrl, myToken, trackId) {
   let blob;
   try {
     const res = await fetch(streamUrl);
@@ -1302,6 +1480,7 @@ async function upgradeToSeekableBlob(streamUrl, myToken) {
     blob = await res.blob();
   } catch (e) { return; } // fine to just stay on the streamed source
   if (myToken !== playbackToken) return; // superseded — discard, don't touch the element
+  if (trackId) cacheRecentBlob(trackId, blob);
 
   const pos = audioEl.currentTime;
   const wasPlaying = !audioEl.paused;
@@ -1420,10 +1599,21 @@ function getPrevIndex() {
   return player.repeatMode === 'all' ? player.queue.length - 1 : null;
 }
 
+let playPauseLocked = false;
 function togglePlayPause() {
   const t = currentTrack();
   if (!t) return;
   if (playbackNeedsRetry) { startPlaybackFor(t); return; } // the button IS the retry action in this state — see handlePlaybackFailure
+  // Guards against rapid repeated taps (real device reports of the button
+  // "getting stuck" after a couple of touches): audioEl.play()'s returned
+  // promise doesn't settle synchronously, so two taps close together could
+  // otherwise both act on a stale .paused reading and step on each other.
+  // A short lock — well under human double-tap timing but imperceptible for
+  // a deliberate second tap — makes exactly one tap produce exactly one
+  // toggle.
+  if (playPauseLocked) return;
+  playPauseLocked = true;
+  setTimeout(() => { playPauseLocked = false; }, 200);
   // No optimistic flip needed — audioEl's own 'play'/'pause' events (see
   // setupAudioEngine) are real, near-synchronous browser events, not an
   // async postMessage round-trip, so they're fast enough to drive the UI
@@ -1447,6 +1637,16 @@ function updateRepeatUI() {
   btn.style.color = player.repeatMode !== 'off' ? 'var(--accent)' : '';
 }
 
+// Updates a cover <img> in place instead of always replacing it via
+// innerHTML — updatePlayerUI runs on every single play/pause tap, not just
+// track changes, and the cover never actually changes on a plain toggle, so
+// recreating the DOM node each time was pure wasted layout/paint work.
+function setCoverImg(container, url) {
+  const existingImg = container.querySelector('img');
+  if (existingImg) { if (existingImg.src !== url) existingImg.src = url; }
+  else container.innerHTML = `<img src="${url}" alt="" />`;
+}
+
 function updatePlayerUI() {
   const t = currentTrack();
   if (!t) return;
@@ -1460,14 +1660,14 @@ function updatePlayerUI() {
   const playIcon = isBuffering ? ICONS.spinner : playbackNeedsRetry ? ICONS.retry : (player.isPlaying ? ICONS.pause : ICONS.play);
   $('#miniTitle').textContent = t.title;
   $('#miniArtist').textContent = t.artist;
-  $('#miniCover').innerHTML = `<img src="${t.thumb}" alt="" />`;
+  setCoverImg($('#miniCover'), t.thumb);
   setIcon($('#miniLikeBtn'), ICONS.heart(isLiked(t.id)));
   setIcon($('#miniPlayBtn'), playIcon);
   $('#miniPlayBtn').setAttribute('aria-label', isBuffering ? 'Caricamento' : playbackNeedsRetry ? 'Riprova' : (player.isPlaying ? 'Pausa' : 'Play'));
 
   $('#fpTitle').textContent = t.title;
   $('#fpArtist').textContent = t.artist;
-  $('#fpCover').innerHTML = `<img src="${t.thumb}" alt="" />`;
+  setCoverImg($('#fpCover'), t.thumb);
   $('#fpBg').style.backgroundImage = `url(${t.thumb})`;
   setIcon($('#fpLikeBtn'), ICONS.heart(isLiked(t.id)));
   $('#fpLikeBtn').classList.toggle('liked', isLiked(t.id));
