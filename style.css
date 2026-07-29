@@ -1084,7 +1084,7 @@ body.has-now-playing #views { padding-bottom: var(--dock-reserve-playing); }
 .modal {
   width: 100%;
   max-width: 520px;
-  max-height: min(80vh, 680px, calc(100dvh - var(--safe-t) - 28px));
+  max-height: min(80vh, 680px, calc(100dvh - var(--safe-t) - var(--dock-reserve) - 10px));
   display: flex;
   flex-direction: column;
   border-radius: var(--r-xl);
@@ -1098,7 +1098,10 @@ body.has-now-playing #views { padding-bottom: var(--dock-reserve-playing); }
   overflow: hidden;
   will-change: transform;
 }
-body.has-now-playing .modal { margin-bottom: var(--dock-reserve-playing); }
+body.has-now-playing .modal {
+  margin-bottom: var(--dock-reserve-playing);
+  max-height: min(80vh, 680px, calc(100dvh - var(--safe-t) - var(--dock-reserve-playing) - 10px));
+}
 @keyframes modalIn { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
 
 .modal-head {
@@ -1207,7 +1210,8 @@ body.has-now-playing .modal { margin-bottom: var(--dock-reserve-playing); }
 .pl-detail-actions { display: flex; gap: 10px; margin: 14px 0 18px; }
 .pl-detail-actions .modal-btn { margin-bottom: 0; }
 .pl-detail-actions .pill-btn { flex-shrink: 0; }
-.pl-detail-modal { max-height: min(85vh, 720px, calc(100dvh - var(--safe-t) - 28px)); }
+.pl-detail-modal { max-height: min(85vh, 720px, calc(100dvh - var(--safe-t) - var(--dock-reserve) - 10px)); }
+body.has-now-playing .pl-detail-modal { max-height: min(85vh, 720px, calc(100dvh - var(--safe-t) - var(--dock-reserve-playing) - 10px)); }
 
 /* add-to-playlist modal */
 .atp-row {
