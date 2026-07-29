@@ -51,6 +51,8 @@ const ICONS = {
   playlistAdd: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h11"/><path d="M3 10h8"/><path d="M3 15h5"/><circle cx="18" cy="16" r="4.5"/><line x1="18" y1="14.3" x2="18" y2="17.7"/><line x1="16.3" y1="16" x2="19.7" y2="16"/></svg>`,
   check: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 9.5 18 20 6"/></svg>`,
   download: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4.5 19h15"/></svg>`,
+  trash: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>`,
+  starOutline: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 2l2.9 6.6L22 9.3l-5 4.9 1.2 7.1L12 17.8 5.8 21.3 7 14.2 2 9.3l7.1-.7z"/></svg>`,
 };
 
 /* =========================================================
@@ -72,6 +74,8 @@ function defaultDB() {
     recentTracks: [],
     playlists: [],
     offlineTracks: [],
+    offlinePlaylists: [],
+    savedArtists: [],
     libraryLayout: 'list',
     libraryFilter: 'all',
     profile: { name: '', photoDataUrl: null },
@@ -555,7 +559,8 @@ function trackRowHtml(t) {
     </button>
   </div>`;
 }
-function wireTrackRows(container, list) {
+function wireTrackRows(container, list, opts) {
+  const addToPlaylistList = (opts && opts.offlinePlaylists) ? db.offlinePlaylists : null;
   $$('.track-row', container).forEach((row) => {
     row.addEventListener('click', (e) => {
       if (e.target.closest('.track-row-like') || e.target.closest('.track-row-queue') || e.target.closest('.track-row-addpl') || e.target.closest('.track-row-download')) return;
@@ -589,7 +594,9 @@ function wireTrackRows(container, list) {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const t = list.find((x) => x.id === btn.dataset.addplId);
-      if (t) openAddToPlaylistModal(t);
+      if (!t) return;
+      if (addToPlaylistList) openAddToPlaylistModal(t, addToPlaylistList, 'Aggiungi a playlist offline');
+      else openAddToPlaylistModal(t);
     });
   });
 }
@@ -649,10 +656,7 @@ function renderLibrary() {
   }
   let artistRows = [];
   if (filter === 'all' || filter === 'artists') {
-    const seen = new Set();
-    db.recentTracks.concat(db.liked).forEach((t) => {
-      if (!seen.has(t.artist)) { seen.add(t.artist); artistRows.push({ type: 'artist', track: t }); }
-    });
+    artistRows = db.savedArtists.map((a) => ({ type: 'artist', artist: a }));
   }
   const all = rows.concat(artistRows);
   if (!all.length) {
@@ -688,9 +692,9 @@ function libRowHtml(r) {
       <div><div class="lib-row-title">${escapeHtml(r.playlist.name)}</div><div class="lib-row-sub">Playlist · ${r.playlist.trackIds.length} brani</div></div>
     </button>`;
   }
-  return `<button type="button" class="lib-row" data-lib-type="artist" data-track-id="${r.track.id}">
-    <img class="lib-row-img" style="border-radius:50%" src="${r.track.thumb}" alt="" />
-    <div><div class="lib-row-title">${escapeHtml(r.track.artist)}</div><div class="lib-row-sub">Artista</div></div>
+  return `<button type="button" class="lib-row" data-lib-type="artist" data-artist-name="${escapeHtml(r.artist.name)}">
+    <img class="lib-row-img" style="border-radius:50%" src="${r.artist.thumb}" alt="" />
+    <div><div class="lib-row-title">${escapeHtml(r.artist.name)}</div><div class="lib-row-sub">Artista</div></div>
   </button>`;
 }
 function libGridItemHtml(r) {
@@ -715,19 +719,15 @@ function libGridItemHtml(r) {
       <div class="card-body"><div class="card-title">${escapeHtml(r.playlist.name)}</div><div class="card-sub">Playlist</div></div>
     </button>`;
   }
-  return `<button type="button" class="card artist-card" data-lib-type="artist" data-track-id="${r.track.id}" style="animation:none;opacity:1">
-    <div class="card-img-wrap"><img src="${r.track.thumb}" alt="" /></div>
-    <div class="card-body"><div class="card-title">${escapeHtml(r.track.artist)}</div><div class="card-sub">Artista</div></div>
+  return `<button type="button" class="card artist-card" data-lib-type="artist" data-artist-name="${escapeHtml(r.artist.name)}" style="animation:none;opacity:1">
+    <div class="card-img-wrap"><img src="${r.artist.thumb}" alt="" /></div>
+    <div class="card-body"><div class="card-title">${escapeHtml(r.artist.name)}</div><div class="card-sub">Artista</div></div>
   </button>`;
 }
 function wireLibraryItems(root, all) {
   $$('[data-lib-type="liked"]', root).forEach((el) => el.addEventListener('click', () => openPlaylistDetail('liked')));
   $$('[data-lib-type="offline"]', root).forEach((el) => el.addEventListener('click', () => openPlaylistDetail('offline')));
-  $$('[data-lib-type="artist"]', root).forEach((el) => el.addEventListener('click', () => {
-    const id = el.dataset.trackId;
-    const item = all.find((r) => r.type === 'artist' && r.track.id === id);
-    if (item) playQueue(db.recentTracks.concat(db.liked).filter((t) => t.artist === item.track.artist), 0);
-  }));
+  $$('[data-lib-type="artist"]', root).forEach((el) => el.addEventListener('click', () => openArtistDetail(el.dataset.artistName)));
   $$('[data-lib-type="playlist"]', root).forEach((el) => el.addEventListener('click', () => openPlaylistDetail('playlist', el.dataset.playlistId)));
 }
 function findKnownTrack(id) {
@@ -798,10 +798,14 @@ function enableModalSwipeDismiss(closeFn) {
 function openPlaylistDetail(kind, playlistId) {
   const isLiked = kind === 'liked';
   const isOfflineKind = kind === 'offline';
-  const pl = (isLiked || isOfflineKind) ? null : db.playlists.find((p) => p.id === playlistId);
-  if (!isLiked && !isOfflineKind && !pl) return;
+  const isOfflinePlaylistKind = kind === 'offlinePlaylist';
+  const isRealPlaylist = kind === 'playlist' || isOfflinePlaylistKind;
+  const sourceList = isOfflinePlaylistKind ? db.offlinePlaylists : db.playlists;
+  const pl = isRealPlaylist ? sourceList.find((p) => p.id === playlistId) : null;
+  if (isRealPlaylist && !pl) return;
   const name = isOfflineKind ? 'Offline' : isLiked ? 'Brani che ti piacciono' : pl.name;
   const tracks = isOfflineKind ? db.offlineTracks : isLiked ? db.liked : pl.trackIds.map((id) => findKnownTrack(id)).filter(Boolean);
+  const isEditable = isRealPlaylist; // rename/cover — not for Liked or the Offline root folder itself
 
   function coverHtml() {
     if (isOfflineKind) return `<div class="pl-detail-cover offline-cover-tile"><span class="ic" style="width:40%;height:40%">${ICONS.download}</span></div>`;
@@ -810,37 +814,80 @@ function openPlaylistDetail(kind, playlistId) {
     return `<div class="pl-detail-cover" style="display:flex;align-items:center;justify-content:center;background:var(--surface-2)"><span class="ic" style="color:var(--text-secondary)">${ICONS.library(false)}</span></div>`;
   }
 
+  // The Offline root folder additionally surfaces its own, separate set of
+  // playlists (built only from downloaded tracks) — kept out of the main
+  // "Playlist" library list on purpose, since the request was specifically
+  // for playlists scoped to this section rather than more general ones.
+  function offlinePlaylistsSectionHtml() {
+    if (!isOfflineKind) return '';
+    const rows = db.offlinePlaylists.map((p) => `
+      <button type="button" class="lib-row" data-offline-pl-id="${p.id}">
+        ${p.coverDataUrl ? `<img class="lib-row-img" src="${p.coverDataUrl}" alt="" />` : `<div class="lib-row-img" style="display:flex;align-items:center;justify-content:center;background:var(--surface-2)"><span class="ic" style="color:var(--text-secondary)">${ICONS.library(false)}</span></div>`}
+        <div><div class="lib-row-title">${escapeHtml(p.name)}</div><div class="lib-row-sub">${p.trackIds.length} brani</div></div>
+      </button>`).join('');
+    return `<div class="pl-detail-section-title">Le tue playlist offline</div>
+      <div class="lib-list" id="offlinePlaylistsList" style="margin-bottom:14px">${rows}</div>
+      <button type="button" class="pill-btn" id="offlineNewPlBtn" style="margin-bottom:16px"><span class="ic"></span><span>Crea playlist offline</span></button>`;
+  }
+
   $('#modalRoot').innerHTML = `
     <div class="modal-overlay" id="plDetailOverlay">
       <div class="modal pl-detail-modal">
         <div class="modal-head">
           <span class="modal-title">${isOfflineKind ? 'Offline' : isLiked ? 'Playlist' : 'Modifica playlist'}</span>
-          <button type="button" class="icon-btn" id="plDetailCloseBtn"><span class="ic">${ICONS.close}</span></button>
+          <div style="display:flex;align-items:center;gap:2px">
+            ${isRealPlaylist ? `<button type="button" class="icon-btn" id="plDeleteBtn" aria-label="Elimina playlist"><span class="ic">${ICONS.trash}</span></button>` : ''}
+            <button type="button" class="icon-btn" id="plDetailCloseBtn"><span class="ic">${ICONS.close}</span></button>
+          </div>
         </div>
         <div class="modal-body">
           <div class="pl-detail-hero">
             <div class="pl-detail-cover-wrap" id="plCoverWrap">${coverHtml()}</div>
-            <div class="pl-detail-name" id="plDetailName" ${(isLiked || isOfflineKind) ? '' : 'contenteditable="true"'}>${escapeHtml(name)}</div>
+            <div class="pl-detail-name" id="plDetailName" ${isEditable ? 'contenteditable="true"' : ''}>${escapeHtml(name)}</div>
             <div class="pl-detail-count">${tracks.length} brani</div>
-            ${(isLiked || isOfflineKind) ? '' : '<input type="file" accept="image/*" id="plCoverInput" class="hidden" />'}
+            ${isEditable ? '<input type="file" accept="image/*" id="plCoverInput" class="hidden" />' : ''}
           </div>
           <div class="pl-detail-actions">
             <button type="button" class="modal-btn" id="plPlayBtn" style="width:auto;flex:1">Riproduci</button>
             <button type="button" class="pill-btn" id="plShuffleBtn"><span class="ic"></span><span>Casuale</span></button>
           </div>
+          ${offlinePlaylistsSectionHtml()}
           <div id="plDetailBody">${tracks.length ? tracks.map((t) => trackRowHtml(t)).join('') : `<div class="empty-state">${isOfflineKind ? 'Nessun brano scaricato ancora — tocca l’icona di download su un brano per salvarlo qui.' : 'Nessun brano qui'}</div>`}</div>
         </div>
       </div>
     </div>`;
   setIcon($('#plDetailCloseBtn'), ICONS.close);
   setIcon($('#plShuffleBtn'), ICONS.shuffle);
-  wireTrackRows($('#plDetailBody'), tracks);
+  wireTrackRows($('#plDetailBody'), tracks, isOfflineKind ? { offlinePlaylists: true } : undefined);
 
   const close = () => { $('#modalRoot').innerHTML = ''; };
   $('#plDetailOverlay').addEventListener('click', (e) => { if (e.target.id === 'plDetailOverlay') close(); });
   $('#plDetailCloseBtn').addEventListener('click', close);
   enableModalSwipeDismiss(close);
   refreshNowPlayingHighlight();
+
+  if (isRealPlaylist) {
+    $('#plDeleteBtn').addEventListener('click', () => {
+      if (!confirm(`Eliminare la playlist "${pl.name}"? I brani non verranno rimossi dagli altri elenchi.`)) return;
+      const idx = sourceList.findIndex((p) => p.id === pl.id);
+      if (idx >= 0) sourceList.splice(idx, 1);
+      saveDB();
+      close();
+      showToast('Playlist eliminata');
+      if (currentRoute === 'library') renderLibrary();
+      if (isOfflinePlaylistKind) openPlaylistDetail('offline'); // back to the offline folder, list refreshed
+    });
+  }
+
+  if (isOfflineKind) {
+    setIcon($('#offlineNewPlBtn'), ICONS.plus);
+    $('#offlineNewPlBtn').addEventListener('click', () => {
+      openCreatePlaylistModal(() => openPlaylistDetail('offline'), db.offlinePlaylists, 'Nuova playlist offline');
+    });
+    $$('[data-offline-pl-id]', $('#modalRoot')).forEach((row) => {
+      row.addEventListener('click', () => openPlaylistDetail('offlinePlaylist', row.dataset.offlinePlId));
+    });
+  }
 
   // Deliberately does NOT close the sheet after starting playback (past
   // behavior did, which the user reported as jarring — they'd rather stay
@@ -860,7 +907,7 @@ function openPlaylistDetail(kind, playlistId) {
     playQueue(tracks, Math.floor(Math.random() * tracks.length));
   });
 
-  if (!isLiked && !isOfflineKind) {
+  if (isEditable) {
     $('#plCoverWrap').addEventListener('click', () => $('#plCoverInput').click());
     $('#plCoverInput').addEventListener('change', async (e) => {
       const file = e.target.files[0];
@@ -910,7 +957,7 @@ function setupLibraryHeader() {
     renderLibrary();
   });
   setIcon($('#libraryAddBtn'), ICONS.plus);
-  $('#libraryAddBtn').addEventListener('click', openCreatePlaylistModal);
+  $('#libraryAddBtn').addEventListener('click', () => openCreatePlaylistModal());
 }
 
 /* =========================================================
@@ -946,6 +993,89 @@ function refreshTrackLikeUI(id) {
     });
   }
 }
+
+/* =========================================================
+   Saved artists — the library's "Artisti" section only ever shows
+   artists explicitly saved here, not every artist that happens to
+   appear in recent/liked tracks (that used to make the list noisy and
+   gave no way to curate it). Reachable by tapping the artist name in
+   the full player.
+   ========================================================= */
+function isArtistSaved(name) { return db.savedArtists.some((a) => a.name === name); }
+function toggleSaveArtist(name, thumb) {
+  const idx = db.savedArtists.findIndex((a) => a.name === name);
+  const wasSaved = idx >= 0;
+  if (wasSaved) db.savedArtists.splice(idx, 1);
+  else db.savedArtists.unshift({ name, thumb });
+  saveDB();
+  showToast(wasSaved ? 'Artista rimosso dai salvati' : 'Artista salvato');
+  if (currentRoute === 'library') renderLibrary();
+  return !wasSaved;
+}
+function openArtistDetail(name) {
+  if (!name) return;
+  const tracks = [];
+  const seen = new Set();
+  db.recentTracks.concat(db.liked, db.offlineTracks).forEach((t) => {
+    if (t.artist === name && !seen.has(t.id)) { seen.add(t.id); tracks.push(t); }
+  });
+  const saved = db.savedArtists.find((a) => a.name === name);
+  const thumb = (saved && saved.thumb) || (tracks[0] && tracks[0].thumb) || '';
+
+  $('#modalRoot').innerHTML = `
+    <div class="modal-overlay" id="artistDetailOverlay">
+      <div class="modal pl-detail-modal">
+        <div class="modal-head">
+          <span class="modal-title">Artista</span>
+          <div style="display:flex;align-items:center;gap:2px">
+            <button type="button" class="icon-btn" id="artistSaveBtn" aria-label="Salva artista"><span class="ic"></span></button>
+            <button type="button" class="icon-btn" id="artistDetailCloseBtn"><span class="ic">${ICONS.close}</span></button>
+          </div>
+        </div>
+        <div class="modal-body">
+          <div class="pl-detail-hero">
+            <div class="pl-detail-cover-wrap" style="border-radius:50%;overflow:hidden">${thumb ? `<img src="${thumb}" alt="" style="width:100%;height:100%;object-fit:cover" />` : `<div class="pl-detail-cover" style="display:flex;align-items:center;justify-content:center;background:var(--surface-2)"><span class="ic" style="color:var(--text-secondary)">${ICONS.account}</span></div>`}</div>
+            <div class="pl-detail-name">${escapeHtml(name)}</div>
+            <div class="pl-detail-count">${tracks.length} brani</div>
+          </div>
+          <div class="pl-detail-actions">
+            <button type="button" class="modal-btn" id="artistPlayBtn" style="width:auto;flex:1">Riproduci</button>
+            <button type="button" class="pill-btn" id="artistShuffleBtn"><span class="ic"></span><span>Casuale</span></button>
+          </div>
+          <div id="artistDetailBody">${tracks.length ? tracks.map((t) => trackRowHtml(t)).join('') : '<div class="empty-state">Nessun brano conosciuto di questo artista — ascoltane qualcuno per vederlo qui.</div>'}</div>
+        </div>
+      </div>
+    </div>`;
+  const refreshSaveIcon = () => {
+    const isSaved = isArtistSaved(name);
+    setIcon($('#artistSaveBtn'), isSaved ? ICONS.star : ICONS.starOutline);
+    $('#artistSaveBtn').style.color = isSaved ? 'var(--accent)' : '';
+    $('#artistSaveBtn').setAttribute('aria-label', isSaved ? 'Rimuovi dai salvati' : 'Salva artista');
+  };
+  refreshSaveIcon();
+  setIcon($('#artistDetailCloseBtn'), ICONS.close);
+  setIcon($('#artistShuffleBtn'), ICONS.shuffle);
+  wireTrackRows($('#artistDetailBody'), tracks);
+
+  const close = () => { $('#modalRoot').innerHTML = ''; };
+  $('#artistDetailOverlay').addEventListener('click', (e) => { if (e.target.id === 'artistDetailOverlay') close(); });
+  $('#artistDetailCloseBtn').addEventListener('click', close);
+  enableModalSwipeDismiss(close);
+  refreshNowPlayingHighlight();
+
+  $('#artistSaveBtn').addEventListener('click', () => { toggleSaveArtist(name, thumb); refreshSaveIcon(); });
+  $('#artistPlayBtn').addEventListener('click', () => {
+    if (!tracks.length) { showToast('Nessun brano di questo artista'); return; }
+    player.shuffle = false;
+    playQueue(tracks, 0);
+  });
+  $('#artistShuffleBtn').addEventListener('click', () => {
+    if (!tracks.length) { showToast('Nessun brano di questo artista'); return; }
+    player.shuffle = true;
+    $$('.fp-shuffle-btn, .np-shuffle-btn').forEach((btn) => btn.classList.add('active'));
+    playQueue(tracks, Math.floor(Math.random() * tracks.length));
+  });
+}
 function spawnHeartBurst(sourceEl) {
   const rect = sourceEl.getBoundingClientRect();
   const cx = rect.left + rect.width / 2;
@@ -971,12 +1101,13 @@ function spawnHeartBurst(sourceEl) {
 // onCreated(playlist) lets a caller (e.g. the add-to-playlist modal) chain
 // straight into "create a playlist, then add the pending track to it"
 // without duplicating the create-playlist UI.
-function openCreatePlaylistModal(onCreated) {
+function openCreatePlaylistModal(onCreated, targetList, titleText) {
+  const list = targetList || db.playlists;
   const root = $('#modalRoot');
   root.innerHTML = `
     <div class="modal-overlay" id="createPlModalOverlay">
       <div class="modal">
-        <div class="modal-head"><span class="modal-title">Nuova playlist</span>
+        <div class="modal-head"><span class="modal-title">${titleText || 'Nuova playlist'}</span>
           <button type="button" class="icon-btn" id="createPlCloseBtn"><span class="ic">${ICONS.close}</span></button>
         </div>
         <div class="modal-body">
@@ -994,7 +1125,7 @@ function openCreatePlaylistModal(onCreated) {
     const name = $('#newPlaylistName').value.trim();
     if (!name) { showToast('Dai un nome alla playlist'); return; }
     const playlist = { id: 'pl_' + Date.now(), name, trackIds: [], coverDataUrl: null };
-    db.playlists.push(playlist);
+    list.push(playlist);
     saveDB();
     close();
     showToast('Playlist creata');
@@ -1009,8 +1140,9 @@ function openCreatePlaylistModal(onCreated) {
    queue/playlist-detail) and from the full player for the current track.
    Previously there was no way to populate a playlist at all once created.
    ========================================================= */
-function openAddToPlaylistModal(track) {
+function openAddToPlaylistModal(track, targetList, titleText) {
   if (!track) return;
+  const list = targetList || db.playlists;
   const root = $('#modalRoot');
   function rowHtml(p) {
     const has = p.trackIds.includes(track.id);
@@ -1022,7 +1154,7 @@ function openAddToPlaylistModal(track) {
   root.innerHTML = `
     <div class="modal-overlay" id="atpOverlay">
       <div class="modal">
-        <div class="modal-head"><span class="modal-title">Aggiungi a playlist</span>
+        <div class="modal-head"><span class="modal-title">${titleText || 'Aggiungi a playlist'}</span>
           <button type="button" class="icon-btn" id="atpCloseBtn"><span class="ic">${ICONS.close}</span></button>
         </div>
         <div class="modal-body">
@@ -1030,7 +1162,7 @@ function openAddToPlaylistModal(track) {
             <div class="atp-row-check atp-new-icon"><span class="ic">${ICONS.plus}</span></div>
             <span class="atp-row-name">Crea nuova playlist</span>
           </button>
-          <div id="atpList">${db.playlists.length ? db.playlists.map(rowHtml).join('') : '<div class="empty-state">Nessuna playlist ancora</div>'}</div>
+          <div id="atpList">${list.length ? list.map(rowHtml).join('') : '<div class="empty-state">Nessuna playlist ancora</div>'}</div>
         </div>
       </div>
     </div>`;
@@ -1043,7 +1175,7 @@ function openAddToPlaylistModal(track) {
   function wireRows() {
     $$('.atp-row[data-pl-id]', root).forEach((row) => {
       row.addEventListener('click', () => {
-        const pl = db.playlists.find((p) => p.id === row.dataset.plId);
+        const pl = list.find((p) => p.id === row.dataset.plId);
         if (!pl) return;
         const idx = pl.trackIds.indexOf(track.id);
         const nowHas = idx < 0;
@@ -1063,8 +1195,8 @@ function openAddToPlaylistModal(track) {
     openCreatePlaylistModal((playlist) => {
       playlist.trackIds.push(track.id);
       saveDB();
-      openAddToPlaylistModal(track);
-    });
+      openAddToPlaylistModal(track, list, titleText);
+    }, list, titleText === 'Aggiungi a playlist offline' ? 'Nuova playlist offline' : undefined);
   });
 }
 
@@ -1299,25 +1431,31 @@ const STREAM_PROXY_BASE = 'https://spotifi-stream-proxy.loribaudi2006.workers.de
 const audioEl = $('#audioEl');
 
 // A hung request here used to mean the buffering spinner could spin
-// forever with no way out. Using Promise.race against a plain timer
-// (rather than only AbortController) guarantees this function itself
-// always returns within RESOLVE_TIMEOUT_MS no matter what the underlying
-// fetch does — some environments don't reliably cancel a stalled fetch on
-// abort(), which left the old version hanging well past its own timeout.
-// Set generously (18s): cobalt's real extraction time varies per video,
-// and cutting it off too eagerly does more harm (a genuinely-working but
-// slightly-slow track wrongly treated as failed) than good.
-const RESOLVE_TIMEOUT_MS = 18000;
+// forever with no way out. Combining AbortController (actually cancels the
+// network request, freeing up the connection instead of leaving it running
+// wastefully in the background) with Promise.race against a plain timer
+// (guarantees THIS function returns on schedule even in environments where
+// abort() doesn't fully/promptly cancel a stalled fetch) covers both
+// failure modes. Set fairly tight (8s): cobalt's real extraction is
+// normally a genuine "few seconds", and letting a stuck attempt run long
+// only compounds — the audio-error auto-retry and the failure-cascade
+// skip-to-next (see handlePlaybackFailure) can each trigger another full
+// resolve, so a slow cap here multiplies across those, which is almost
+// certainly what "sometimes minutes" was actually coming from.
+const RESOLVE_TIMEOUT_MS = 8000;
 function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 async function resolveStreamUrl(videoId) {
   const bitrate = db.audioBitrate === '128' ? '128' : '64';
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), RESOLVE_TIMEOUT_MS);
   try {
     const result = await Promise.race([
-      fetch(`${STREAM_PROXY_BASE}/streams/${videoId}?bitrate=${bitrate}`).then((res) => (res.ok ? res.json() : null)),
+      fetch(`${STREAM_PROXY_BASE}/streams/${videoId}?bitrate=${bitrate}`, { signal: controller.signal }).then((res) => (res.ok ? res.json() : null)),
       delay(RESOLVE_TIMEOUT_MS).then(() => null),
     ]);
     return (result && result.url) || null;
   } catch (e) { return null; }
+  finally { clearTimeout(timer); }
 }
 
 // Resolving a stream URL is the slow, third-party-dependent step (cobalt
@@ -1463,7 +1601,7 @@ async function startPlaybackFor(track, isRetry) {
     const objUrl = URL.createObjectURL(fastBlob);
     currentBlobUrl = objUrl;
     audioEl.src = objUrl;
-    try { await audioEl.play(); } catch (e) { /* 'pause'/'error' listeners reflect whatever actually happened */ }
+    try { await Promise.race([audioEl.play(), delay(10000)]); } catch (e) { /* 'pause'/'error' listeners reflect whatever actually happened */ }
     setBuffering(false);
     return;
   }
@@ -1478,7 +1616,7 @@ async function startPlaybackFor(track, isRetry) {
 
   suppressNextAudioError = false;
   audioEl.src = streamUrl;
-  try { await audioEl.play(); } catch (e) { /* 'pause'/'error' listeners reflect whatever actually happened */ }
+  try { await Promise.race([audioEl.play(), delay(10000)]); } catch (e) { /* 'pause'/'error' listeners reflect whatever actually happened */ }
   setBuffering(false);
   upgradeToSeekableBlob(streamUrl, myToken, track.id);
   // NOT scheduled here — see the 'timeupdate' listener in setupAudioEngine,
@@ -1625,10 +1763,10 @@ function getNextIndex() {
       .map((_, i) => i)
       .filter((i) => i !== player.currentIndex && !player.shuffleHistory.includes(i));
     if (!candidates.length) {
-      // Everything else has already had a turn this cycle — start a fresh
-      // one, still excluding the track playing right now so it can't come
-      // up again back-to-back.
-      if (player.repeatMode !== 'all') return null;
+      // Everything else has already had a turn this cycle — reshuffle and
+      // keep going (shuffle plays continuously, same as before this
+      // no-repeat behavior existed), just still excluding the track
+      // playing right now so it can't come up again back-to-back.
       player.shuffleHistory = [];
       candidates = player.queue.map((_, i) => i).filter((i) => i !== player.currentIndex);
     }
@@ -2020,6 +2158,7 @@ function setupPlayerControls() {
   $('#fpShuffleBtn').addEventListener('click', toggleShuffle);
   $('#fpRepeatBtn').addEventListener('click', cycleRepeat);
   $('#fpLikeBtn').addEventListener('click', () => { const t = currentTrack(); if (t) toggleLike(t, $('#fpLikeBtn')); });
+  $('#fpArtist').addEventListener('click', () => { const t = currentTrack(); if (t) openArtistDetail(t.artist); });
   $('#fpQueueBtn2').addEventListener('click', openQueueModal);
   $('#fpPlaylistBtn').addEventListener('click', () => { const t = currentTrack(); if (t) openAddToPlaylistModal(t); });
   $('#fpDownloadBtn').addEventListener('click', () => { const t = currentTrack(); if (t) downloadTrackOffline(t); });
