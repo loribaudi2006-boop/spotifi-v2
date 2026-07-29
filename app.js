@@ -1297,14 +1297,37 @@ async function fetchLyrics(track) {
 const STREAM_PROXY_BASE = 'https://spotifi-stream-proxy.loribaudi2006.workers.dev';
 const audioEl = $('#audioEl');
 
-async function resolveStreamUrl(videoId) {
+// A hung request here used to mean the buffering spinner could spin
+// forever with no way out — bounding it means a slow/dead resolve fails
+// fast and falls into the existing retry/skip logic instead of just
+// sitting there, which is as much a stability fix as a speed one.
+const RESOLVE_TIMEOUT_MS = 8000;
+async function resolveStreamUrl(videoId, bitrateOverride) {
+  const bitrate = bitrateOverride || (db.audioBitrate === '128' ? '128' : '64');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), RESOLVE_TIMEOUT_MS);
   try {
-    const bitrate = db.audioBitrate === '128' ? '128' : '64';
-    const res = await fetch(`${STREAM_PROXY_BASE}/streams/${videoId}?bitrate=${bitrate}`);
+    const res = await fetch(`${STREAM_PROXY_BASE}/streams/${videoId}?bitrate=${bitrate}`, { signal: controller.signal });
     if (!res.ok) return null;
     const data = await res.json();
     return (data && data.url) || null;
   } catch (e) { return null; }
+  finally { clearTimeout(timer); }
+}
+
+// Some videos only extract cleanly at one of the two bitrates (a cobalt/
+// source quirk, not something this app controls) — when the player's
+// current bitrate setting comes back empty, silently trying the OTHER
+// bitrate once, before treating the track as genuinely unavailable, is the
+// single biggest lever available here for "why won't this one play":
+// most of the tracks that used to dead-end on a null resolve actually do
+// have a working stream at the other bitrate.
+async function resolveStreamUrlWithFallback(videoId) {
+  const primary = db.audioBitrate === '128' ? '128' : '64';
+  const fallback = primary === '128' ? '64' : '128';
+  const url = await resolveStreamUrl(videoId, primary);
+  if (url) return url;
+  return await resolveStreamUrl(videoId, fallback);
 }
 
 // Resolving a stream URL is the slow, third-party-dependent step (cobalt
@@ -1459,7 +1482,7 @@ async function startPlaybackFor(track, isRetry) {
   // schedulePrefetchNext) skips the slow resolve step entirely — this is
   // what makes playing straight through a queue feel instant despite
   // cobalt's own extraction taking a few real seconds per track.
-  const streamUrl = (await takePrefetchedStreamUrl(track)) || (await resolveStreamUrl(track.id));
+  const streamUrl = (await takePrefetchedStreamUrl(track)) || (await resolveStreamUrlWithFallback(track.id));
   if (myToken !== playbackToken) return; // a different track was picked meanwhile
   if (!streamUrl) { setBuffering(false); handlePlaybackFailure(); return; }
 
