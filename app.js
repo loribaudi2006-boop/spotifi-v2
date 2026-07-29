@@ -189,6 +189,7 @@ const player = {
   isPlaying: false,
   shuffle: false,
   repeatMode: 'off', // off | all | one
+  shuffleHistory: [], // queue indices already surfaced in the current shuffle cycle — see getNextIndex
 };
 
 function currentTrack() {
@@ -1564,12 +1565,14 @@ function setupAudioEngine() {
 function playQueue(list, startIndex) {
   if (!list || !list.length) return;
   player.queue = list.slice();
+  player.shuffleHistory = []; // fresh queue — a new shuffle cycle starts from scratch
   playIndex(startIndex);
 }
 function playIndex(index) {
   if (index < 0 || index >= player.queue.length) return;
   player.currentIndex = index;
   const track = player.queue[index];
+  if (player.shuffle && !player.shuffleHistory.includes(index)) player.shuffleHistory.push(index);
   addToRecent(track);
   player.isPlaying = true;
   updatePlayerUI();
@@ -1595,12 +1598,41 @@ function onTrackEnded() {
   if (next === null) { player.isPlaying = false; updatePlayerUI(); return; }
   playIndex(next);
 }
+// Weighted, no-immediate-repeat shuffle: picks from whichever tracks
+// haven't come up yet in this cycle (a real "shuffle bag", not plain
+// random-with-replacement — the old version could replay the same song
+// several times before others got a turn), and within that pool leans
+// toward tracks by the same artist as what's currently playing. YouTube
+// gives us no genre/style metadata to go on, so same-artist is the best
+// available stand-in for "similar" — everything else in the pool still
+// gets picked sometimes, just less often.
+const SHUFFLE_SAME_ARTIST_WEIGHT = 3;
+function pickWeightedShuffleIndex(candidates) {
+  const current = currentTrack();
+  const weights = candidates.map((i) => (current && player.queue[i].artist === current.artist) ? SHUFFLE_SAME_ARTIST_WEIGHT : 1);
+  const total = weights.reduce((a, b) => a + b, 0);
+  let r = Math.random() * total;
+  for (let k = 0; k < candidates.length; k++) {
+    r -= weights[k];
+    if (r <= 0) return candidates[k];
+  }
+  return candidates[candidates.length - 1];
+}
 function getNextIndex() {
   if (player.shuffle) {
     if (player.queue.length <= 1) return player.repeatMode === 'all' ? player.currentIndex : null;
-    let idx;
-    do { idx = Math.floor(Math.random() * player.queue.length); } while (idx === player.currentIndex);
-    return idx;
+    let candidates = player.queue
+      .map((_, i) => i)
+      .filter((i) => i !== player.currentIndex && !player.shuffleHistory.includes(i));
+    if (!candidates.length) {
+      // Everything else has already had a turn this cycle — start a fresh
+      // one, still excluding the track playing right now so it can't come
+      // up again back-to-back.
+      if (player.repeatMode !== 'all') return null;
+      player.shuffleHistory = [];
+      candidates = player.queue.map((_, i) => i).filter((i) => i !== player.currentIndex);
+    }
+    return pickWeightedShuffleIndex(candidates);
   }
   if (player.currentIndex + 1 < player.queue.length) return player.currentIndex + 1;
   return player.repeatMode === 'all' ? 0 : null;
@@ -1636,6 +1668,7 @@ function playNext() { const i = getNextIndex(); if (i !== null) playIndex(i); }
 function playPrev() { const i = getPrevIndex(); if (i !== null) playIndex(i); }
 function toggleShuffle() {
   player.shuffle = !player.shuffle;
+  if (player.shuffle) player.shuffleHistory = player.currentIndex >= 0 ? [player.currentIndex] : [];
   $$('.fp-shuffle-btn, .np-shuffle-btn').forEach((btn) => btn.classList.toggle('active', player.shuffle));
   if (player.shuffle && navigator.vibrate) navigator.vibrate(15);
 }
@@ -1683,6 +1716,8 @@ function updatePlayerUI() {
   $('#fpBg').style.backgroundImage = `url(${t.thumb})`;
   setIcon($('#fpLikeBtn'), ICONS.heart(isLiked(t.id)));
   $('#fpLikeBtn').classList.toggle('liked', isLiked(t.id));
+  const fpDownloadBtn = $('#fpDownloadBtn');
+  if (fpDownloadBtn) { fpDownloadBtn.dataset.dlId = t.id; refreshDownloadUI(t.id); }
   setIcon($('#fpPlayBtn'), playIcon);
   $('#fpPlayBtn').setAttribute('aria-label', isBuffering ? 'Caricamento' : playbackNeedsRetry ? 'Riprova' : (player.isPlaying ? 'Pausa' : 'Play'));
   refreshNowPlayingHighlight();
@@ -1987,6 +2022,7 @@ function setupPlayerControls() {
   $('#fpLikeBtn').addEventListener('click', () => { const t = currentTrack(); if (t) toggleLike(t, $('#fpLikeBtn')); });
   $('#fpQueueBtn2').addEventListener('click', openQueueModal);
   $('#fpPlaylistBtn').addEventListener('click', () => { const t = currentTrack(); if (t) openAddToPlaylistModal(t); });
+  $('#fpDownloadBtn').addEventListener('click', () => { const t = currentTrack(); if (t) downloadTrackOffline(t); });
   $('#fpLyricsBtn').addEventListener('click', openLyricsPanel);
   $('#fpLyricsCloseBtn').addEventListener('click', closeLyricsPanel);
   $('#fpShareBtn').addEventListener('click', () => {
@@ -2005,6 +2041,7 @@ function setupPlayerControls() {
   setIcon($('#fpLyricsCloseBtn'), ICONS.close);
   setIcon($('#fpQueueBtn2'), ICONS.queueList);
   setIcon($('#fpPlaylistBtn'), ICONS.playlistAdd);
+  setIcon($('#fpDownloadBtn'), ICONS.download);
   setIcon($('#fpLyricsBtn'), ICONS.lyrics);
   setIcon($('#fpShareBtn'), ICONS.share);
 
