@@ -622,6 +622,7 @@ function enableModalSwipeDismiss(closeFn) {
     if (e.target.closest('button')) return;
     dragging = true; pointerId = e.pointerId;
     startY = lastY = e.clientY; lastT = performance.now(); velocity = 0;
+    modal.style.transition = 'none';
     handle.setPointerCapture(e.pointerId);
   }
   function onMove(e) {
@@ -633,14 +634,24 @@ function enableModalSwipeDismiss(closeFn) {
     velocity = (e.clientY - lastY) / dt;
     lastY = e.clientY; lastT = now;
   }
+  function settle(shouldClose) {
+    modal.style.transition = shouldClose
+      ? 'transform 0.22s cubic-bezier(0.32, 0.72, 0, 1)'
+      : 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)';
+    if (shouldClose) {
+      modal.style.transform = 'translateY(100%)';
+      setTimeout(closeFn, 220);
+    } else {
+      modal.style.transform = '';
+    }
+  }
   function onUp() {
     if (!dragging) return;
     dragging = false;
     const dy = lastY - startY;
-    modal.style.transform = '';
-    if (dy > 100 || (velocity > 0.5 && dy > 20)) closeFn();
+    settle(dy > 100 || (velocity > 0.5 && dy > 20));
   }
-  function onCancel() { dragging = false; modal.style.transform = ''; }
+  function onCancel() { if (!dragging) return; dragging = false; settle(false); }
   handle.addEventListener('pointerdown', onDown);
   handle.addEventListener('pointermove', onMove);
   handle.addEventListener('pointerup', onUp);
@@ -1676,6 +1687,7 @@ function setupFullPlayerDismiss() {
     if (e.target.closest('button')) return;
     dragging = true; pointerId = e.pointerId; activeEl = e.currentTarget;
     startY = lastY = e.clientY; lastT = performance.now(); velocity = 0;
+    fp.style.transition = 'none';
     activeEl.setPointerCapture(e.pointerId);
   }
   function onMove(e) {
@@ -1687,14 +1699,29 @@ function setupFullPlayerDismiss() {
     velocity = (e.clientY - lastY) / dt;
     lastY = e.clientY; lastT = now;
   }
+  function settle(shouldClose) {
+    if (shouldClose) {
+      fp.style.transition = 'transform 0.25s cubic-bezier(0.32, 0.72, 0, 1)';
+      fp.style.transform = 'translateY(100%)';
+      $('#fpBg').classList.remove('visible');
+      setTimeout(() => {
+        fp.classList.add('hidden');
+        fp.style.transition = '';
+        fp.style.transform = '';
+        refreshMiniPlayerElevation();
+      }, 250);
+    } else {
+      fp.style.transition = 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)';
+      fp.style.transform = '';
+    }
+  }
   function onUp(e) {
     if (!dragging || e.pointerId !== pointerId) return;
     dragging = false;
     const dy = lastY - startY;
-    fp.style.transform = '';
-    if (dy > 100 || (velocity > 0.5 && dy > 20)) closeFullPlayer();
+    settle(dy > 100 || (velocity > 0.5 && dy > 20));
   }
-  function onCancel() { dragging = false; fp.style.transform = ''; }
+  function onCancel() { if (!dragging) return; dragging = false; settle(false); }
 
   // bound to both the thin drag handle AND the (much larger, easier to
   // grab on a real touchscreen) cover art area — matches how most mobile

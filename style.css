@@ -233,9 +233,9 @@ h1, h2, h3, .section-title, .modal-title, .lh-title, .hh-greeting,
   align-items: center;
   justify-content: center;
   color: var(--text-primary);
-  transition: border-color 0.15s ease, transform 0.15s ease;
+  transition: border-color 0.15s ease, transform 0.1s ease-out;
 }
-.account-btn:active { transform: scale(0.93); }
+.account-btn:active { transform: scale(0.93); transition-duration: 0.05s; }
 .account-btn .ic { width: 20px; height: 20px; }
 
 .tb-actions {
@@ -272,10 +272,10 @@ svg.icon-spin { transform-box: fill-box; transform-origin: 50% 50%; }
   border: 1px solid var(--glass-border-soft);
   color: var(--text-secondary);
   flex-shrink: 0;
-  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease-out;
 }
 .icon-btn:hover { background: var(--surface-2); color: var(--text-primary); }
-.icon-btn:active { transform: scale(0.92); }
+.icon-btn:active { transform: scale(0.92); transition-duration: 0.05s; }
 
 .pill-btn {
   display: inline-flex;
@@ -290,10 +290,10 @@ svg.icon-spin { transform-box: fill-box; transform-origin: 50% 50%; }
   color: var(--text-secondary);
   font-size: 13.5px;
   font-weight: 600;
-  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease-out;
 }
 .pill-btn:hover { background: var(--surface-2); color: var(--text-primary); }
-.pill-btn:active { transform: scale(0.95); }
+.pill-btn:active { transform: scale(0.95); transition-duration: 0.05s; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 .icon-spin { animation: spin 1s linear infinite; }
@@ -447,7 +447,7 @@ svg.icon-spin { transform-box: fill-box; transform-origin: 50% 50%; }
   color: var(--text-secondary);
   font-size: 13.5px;
   font-weight: 600;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.1s ease-out;
   white-space: nowrap;
 }
 .chip.active {
@@ -455,7 +455,7 @@ svg.icon-spin { transform-box: fill-box; transform-origin: 50% 50%; }
   border-color: var(--accent);
   color: var(--accent-ink);
 }
-.chip:active { transform: scale(0.95); }
+.chip:active { transform: scale(0.95); transition-duration: 0.05s; }
 
 /* Two long, mutually-exclusive options (audio quality) read better as
    full-width stacked rows than as a horizontally-scrolling chip strip —
@@ -517,7 +517,7 @@ body.has-now-playing #views { padding-bottom: var(--dock-reserve-playing); }
   gap: 12px;
   overflow-x: auto;
   margin: 0 -16px;
-  padding: 2px 16px 8px;
+  padding: 4px 16px 8px 22px;
   scroll-snap-type: x proximity;
 }
 .lib-grid {
@@ -535,8 +535,10 @@ body.has-now-playing #views { padding-bottom: var(--dock-reserve-playing); }
   border-radius: var(--r-lg);
   animation: cardIn 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
   scroll-snap-align: start;
+  transition: transform 0.1s ease-out;
 }
 .lib-grid .card { width: auto; }
+.card:active { transition-duration: 0.05s; }
 .card-img-wrap {
   position: relative;
   aspect-ratio: 1 / 1;
@@ -546,7 +548,7 @@ body.has-now-playing #views { padding-bottom: var(--dock-reserve-playing); }
   border: 1px solid var(--glass-border-soft);
   box-shadow: var(--shadow-soft);
 }
-.card-img-wrap img { width: 100%; height: 100%; object-fit: cover; transform: scale(1.15); }
+.card-img-wrap img { width: 100%; height: 100%; object-fit: cover; transform: scale(1.4); }
 .artist-card .card-img-wrap,
 .artist-card .card-img-wrap img { border-radius: 50%; }
 .card-body { padding: 10px 3px 0; }
@@ -597,9 +599,9 @@ body.has-now-playing #views { padding-bottom: var(--dock-reserve-playing); }
   border: 1px solid var(--glass-border-soft);
   overflow: hidden;
   text-align: left;
-  transition: background 0.15s ease, transform 0.15s ease;
+  transition: background 0.15s ease, transform 0.1s ease-out;
 }
-.quick-tile:active { transform: scale(0.97); background: var(--surface-2); }
+.quick-tile:active { transform: scale(0.97); background: var(--surface-2); transition-duration: 0.05s; }
 .quick-tile.now-playing-highlight { background: var(--accent-soft); }
 .quick-tile-img {
   width: 56px;
@@ -630,13 +632,13 @@ body.has-now-playing #views { padding-bottom: var(--dock-reserve-playing); }
   position: relative;
   aspect-ratio: 2.1 / 1;
   border-radius: var(--r-lg);
-  transition: transform 0.15s ease;
+  transition: transform 0.1s ease-out;
   overflow: hidden;
   padding: 14px;
   text-align: left;
   box-shadow: var(--shadow-soft);
 }
-.cat-tile:active { transform: scale(0.96); }
+.cat-tile:active { transform: scale(0.96); transition-duration: 0.05s; }
 .cat-tile::after {
   content: '';
   position: absolute;
@@ -761,7 +763,7 @@ body.has-now-playing #views { padding-bottom: var(--dock-reserve-playing); }
   flex-shrink: 0;
   background: var(--surface-1);
 }
-.mp-cover img { width: 100%; height: 100%; object-fit: cover; transform: scale(1.15); }
+.mp-cover img { width: 100%; height: 100%; object-fit: cover; transform: scale(1.4); }
 .mp-meta { min-width: 0; flex: 1; }
 .mp-title { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mp-artist { font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
@@ -778,7 +780,8 @@ body.has-now-playing #views { padding-bottom: var(--dock-reserve-playing); }
   flex-shrink: 0;
 }
 .mp-play-btn .ic { width: 18px; height: 18px; }
-.mp-play-btn:active { transform: scale(0.92); }
+.mp-play-btn { transition: transform 0.1s ease-out; }
+.mp-play-btn:active { transform: scale(0.92); transition-duration: 0.05s; }
 
 /* =========================================================================
    14. Bottom nav — floating glass dock, deliberately inset from every edge
@@ -812,12 +815,12 @@ body.has-now-playing #views { padding-bottom: var(--dock-reserve-playing); }
   gap: 3px;
   color: var(--text-secondary);
   border-radius: var(--r-full);
-  transition: color 0.15s ease;
+  transition: color 0.15s ease, transform 0.1s ease-out;
 }
 .nav-item .nav-icon { width: 22px; height: 22px; }
 .nav-label { font-size: 10.5px; font-weight: 600; }
 .nav-item.active { color: var(--accent); }
-.nav-item:active { transform: scale(0.95); }
+.nav-item:active { transform: scale(0.95); transition-duration: 0.05s; }
 
 /* =========================================================================
    15. Full player
@@ -908,7 +911,7 @@ body.has-now-playing #views { padding-bottom: var(--dock-reserve-playing); }
   box-shadow: var(--shadow-float);
   border: 1px solid var(--glass-border-soft);
 }
-.fp-cover img { width: 100%; height: 100%; object-fit: cover; display: block; transform: scale(1.15); }
+.fp-cover img { width: 100%; height: 100%; object-fit: cover; display: block; transform: scale(1.4); }
 
 .fp-info {
   position: relative;
@@ -1011,10 +1014,10 @@ body.has-now-playing #views { padding-bottom: var(--dock-reserve-playing); }
   justify-content: center;
   box-shadow: var(--shadow-btn);
   flex-shrink: 0;
-  transition: transform 0.15s ease;
+  transition: transform 0.1s ease-out;
 }
 .fp-play-btn .ic { width: 28px; height: 28px; }
-.fp-play-btn:active { transform: scale(0.94); }
+.fp-play-btn:active { transform: scale(0.94); transition-duration: 0.05s; }
 
 .fp-bottom-row {
   display: flex;
@@ -1084,7 +1087,7 @@ body.has-now-playing #views { padding-bottom: var(--dock-reserve-playing); }
 .modal {
   width: 100%;
   max-width: 520px;
-  max-height: min(80vh, 680px, calc(100dvh - var(--safe-t) - var(--dock-reserve) - 10px));
+  max-height: min(74vh, 620px, calc(100dvh - var(--safe-t) - var(--dock-reserve) - 10px));
   display: flex;
   flex-direction: column;
   border-radius: var(--r-xl);
@@ -1100,7 +1103,7 @@ body.has-now-playing #views { padding-bottom: var(--dock-reserve-playing); }
 }
 body.has-now-playing .modal {
   margin-bottom: var(--dock-reserve-playing);
-  max-height: min(80vh, 680px, calc(100dvh - var(--safe-t) - var(--dock-reserve-playing) - 10px));
+  max-height: min(74vh, 620px, calc(100dvh - var(--safe-t) - var(--dock-reserve-playing) - 10px));
 }
 @keyframes modalIn { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
 
@@ -1157,9 +1160,9 @@ body.has-now-playing .modal {
   font-weight: 700;
   text-align: center;
   margin-bottom: 10px;
-  transition: transform 0.15s ease, opacity 0.15s ease;
+  transition: transform 0.1s ease-out, opacity 0.15s ease;
 }
-.modal-btn:active { transform: scale(0.98); }
+.modal-btn:active { transform: scale(0.98); transition-duration: 0.05s; }
 
 .modal-hint {
   font-size: 13px;
@@ -1197,7 +1200,7 @@ body.has-now-playing .modal {
   border: 1px solid var(--glass-border-soft);
 }
 .pl-detail-cover { width: 100%; height: 100%; }
-.pl-detail-cover img { width: 100%; height: 100%; object-fit: cover; transform: scale(1.15); }
+.pl-detail-cover img { width: 100%; height: 100%; object-fit: cover; transform: scale(1.4); }
 .pl-detail-name {
   font-size: 21px;
   font-weight: 700;
@@ -1210,8 +1213,8 @@ body.has-now-playing .modal {
 .pl-detail-actions { display: flex; gap: 10px; margin: 14px 0 18px; }
 .pl-detail-actions .modal-btn { margin-bottom: 0; }
 .pl-detail-actions .pill-btn { flex-shrink: 0; }
-.pl-detail-modal { max-height: min(85vh, 720px, calc(100dvh - var(--safe-t) - var(--dock-reserve) - 10px)); }
-body.has-now-playing .pl-detail-modal { max-height: min(85vh, 720px, calc(100dvh - var(--safe-t) - var(--dock-reserve-playing) - 10px)); }
+.pl-detail-modal { max-height: min(79vh, 660px, calc(100dvh - var(--safe-t) - var(--dock-reserve) - 10px)); }
+body.has-now-playing .pl-detail-modal { max-height: min(79vh, 660px, calc(100dvh - var(--safe-t) - var(--dock-reserve-playing) - 10px)); }
 
 /* add-to-playlist modal */
 .atp-row {
