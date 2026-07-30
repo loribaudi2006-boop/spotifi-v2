@@ -278,13 +278,66 @@ function updateGreeting() {
 /* =========================================================
    YouTube Data API search
    ========================================================= */
+// Collapses different uploads of the SAME underlying song onto one key, by
+// stripping the noise that otherwise makes them look like different tracks:
+// anything in (parentheses)/[brackets] (official video / lyrics / remix /
+// sped up / cover / live / anni vari...), "feat. …" credits, and stray
+// punctuation/case differences. Two titles that reduce to the same key are
+// treated as the same song for deduplication purposes.
+function cleanTrackTitleForKey(raw) {
+  return raw
+    .toLowerCase()
+    .replace(/\(.*?\)|\[.*?\]/g, ' ') // drop bracketed/parenthesized bits entirely
+    .replace(/\b(feat|ft)\.?.*$/i, '')
+    .replace(/\b(official\s*(video|audio|music\s*video|lyric\s*video)?|lyrics?|video\s*ufficiale|testo|hd|hq|4k|remaster(ed)?|mv)\b/gi, '')
+    .replace(/[^\p{L}\p{N}-]+/gu, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+// YouTube titles show up in two common shapes — "Artist - Title" and plain
+// "Title" (with the artist only living in channelTitle) — so a single
+// cleaned string doesn't reliably line up between two uploads of the same
+// song. Instead this returns every plausible "just the song part" reading:
+// the whole cleaned title, and (if there's a dash) whatever's before and
+// after it. If ANY of these match between two tracks, they're the same song.
+function trackKeyCandidates(t) {
+  const cleaned = cleanTrackTitleForKey(t.title);
+  const candidates = new Set([cleaned]);
+  const parts = cleaned.split(/\s+-\s+/).map((p) => p.trim()).filter(Boolean);
+  if (parts.length > 1) parts.forEach((p) => candidates.add(p));
+  return candidates;
+}
+// Keeps only the first occurrence of each underlying song and drops the
+// rest. YouTube already returns results ranked by relevance, so "first" is
+// also "most relevant" — without this, a search very often comes back as
+// the same song 3-4 times over (official video, lyric video, remix, a
+// cover...), which is exactly what made "the next ones" in a played queue
+// so often just repeat the song you'd already heard.
+function dedupeTracksBySong(list) {
+  const seen = new Set();
+  const out = [];
+  for (const t of list) {
+    const candidates = trackKeyCandidates(t);
+    let isDup = false;
+    for (const c of candidates) { if (c && seen.has(c)) { isDup = true; break; } }
+    if (isDup) continue;
+    candidates.forEach((c) => { if (c) seen.add(c); });
+    out.push(t);
+  }
+  return out;
+}
 async function ytSearch(query, max = 15) {
   if (!db.apiKey) {
     showToast('Inserisci la tua chiave YouTube API nelle Impostazioni');
     openSettingsModal();
     return [];
   }
-  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoCategoryId=10&maxResults=${max}&q=${encodeURIComponent(query)}&key=${db.apiKey}`;
+  // Request more than `max` raw results from YouTube — dedup below throws
+  // out same-song re-uploads, so asking for exactly `max` would often leave
+  // the user with a noticeably short list after the noise is removed.
+  // YouTube's own cap is 50 per request.
+  const requestCount = Math.min(max * 2, 50);
+  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoCategoryId=10&maxResults=${requestCount}&q=${encodeURIComponent(query)}&key=${db.apiKey}`;
   try {
     const res = await fetch(url);
     const data = await res.json();
@@ -297,12 +350,13 @@ async function ytSearch(query, max = 15) {
       }
       return [];
     }
-    return (data.items || []).map((item) => ({
+    const rawTracks = (data.items || []).map((item) => ({
       id: item.id.videoId,
       title: item.snippet.title,
       artist: item.snippet.channelTitle,
       thumb: item.snippet.thumbnails.high ? item.snippet.thumbnails.high.url : item.snippet.thumbnails.default.url,
     }));
+    return dedupeTracksBySong(rawTracks).slice(0, max);
   } catch (e) {
     showToast('Impossibile contattare YouTube — controlla la connessione');
     return [];
@@ -1471,9 +1525,25 @@ function schedulePrefetchNext() {
   if (nextIdx === null) return;
   const nextTrack = player.queue[nextIdx];
   if (prefetch && prefetch.trackId === nextTrack.id) return; // already have it / already fetching it
+  if (getRecentBlob(nextTrack.id)) return; // already fully cached from an earlier play, nothing to do
   const entry = { trackId: nextTrack.id, promise: null, url: null, resolvedAt: 0 };
-  entry.promise = resolveStreamUrl(nextTrack.id).then((url) => {
-    if (prefetch === entry) { entry.url = url; entry.resolvedAt = Date.now(); }
+  entry.promise = resolveStreamUrl(nextTrack.id).then(async (url) => {
+    if (prefetch !== entry) return; // superseded meanwhile — don't touch shared state or waste bandwidth
+    entry.url = url; entry.resolvedAt = Date.now();
+    if (!url) return;
+    // Fully download the next track's audio now, while there's still time
+    // before the current one ends, and cache it the same way an
+    // already-played track gets cached (see recentBlobCache/cacheRecentBlob
+    // below). Mobile browsers throttle a backgrounded/locked page's own
+    // fetch calls hard — a resolve-or-download kicked off only at the exact
+    // moment 'ended' fires can stall for a long time until the app is
+    // reopened, even though nothing is actually broken. A blob already
+    // sitting in the cache needs no network at all to start playing, so the
+    // track-to-track transition keeps working while the phone is locked.
+    try {
+      const res = await fetch(url);
+      if (res.ok) cacheRecentBlob(nextTrack.id, await res.blob());
+    } catch (e) { /* fine — falls back to the resolved streaming URL instead */ }
   });
   prefetch = entry;
 }
@@ -1698,6 +1768,36 @@ function setupAudioEngine() {
     // dead URL.
     startPlaybackFor(t, true);
   });
+}
+
+// Mobile browsers (iOS Safari in particular, but Android too) throttle a
+// backgrounded/locked page's own JS hard — timers and fetch calls can sit
+// suspended rather than actually failing. That's what made playback look
+// stuck until the app was reopened: the track-ended / resume-after-pause
+// logic was mid-fetch (resolving a stream URL, or downloading one) and that
+// fetch was simply frozen, not broken — bringing the page back to the
+// foreground is what let it finish. The prefetched-blob cache above removes
+// the network dependency for the common "track just ended" case entirely,
+// but this is a safety net for whatever's left: the instant the app comes
+// back to the foreground, check whether playback SHOULD be going but isn't,
+// and resume immediately instead of waiting for the user to notice and tap
+// play themselves.
+function recoverPlaybackIfStuck() {
+  const t = currentTrack();
+  if (!t) return;
+  if (playbackNeedsRetry) { startPlaybackFor(t); return; }
+  if (player.isPlaying && audioEl.paused && !isBuffering) {
+    audioEl.play().catch(() => startPlaybackFor(t, true));
+  }
+}
+function setupBackgroundRecovery() {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') recoverPlaybackIfStuck();
+  });
+  // pageshow (fired on iOS Safari when a suspended/bfcached tab comes back,
+  // which doesn't always also fire visibilitychange) covers the same case
+  // via a second signal.
+  window.addEventListener('pageshow', recoverPlaybackIfStuck);
 }
 
 function playQueue(list, startIndex) {
@@ -2351,6 +2451,7 @@ function boot() {
   setupLibraryHeader();
   setupPlayerControls();
   setupAudioEngine();
+  setupBackgroundRecovery();
   setupMiniPlayerElevationObserver();
   goTo('home');
   requestAnimationFrame(() => requestAnimationFrame(nudgeSafeAreaLayout));
