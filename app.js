@@ -1490,16 +1490,15 @@ const audioEl = $('#audioEl');
 // wastefully in the background) with Promise.race against a plain timer
 // (guarantees THIS function returns on schedule even in environments where
 // abort() doesn't fully/promptly cancel a stalled fetch) covers both
-// failure modes. Set fairly tight (8s): cobalt's real extraction is
+// failure modes. Set fairly tight (6s): cobalt's real extraction is
 // normally a genuine "few seconds", and letting a stuck attempt run long
 // only compounds — the audio-error auto-retry and the failure-cascade
 // skip-to-next (see handlePlaybackFailure) can each trigger another full
 // resolve, so a slow cap here multiplies across those, which is almost
 // certainly what "sometimes minutes" was actually coming from.
-const RESOLVE_TIMEOUT_MS = 8000;
+const RESOLVE_TIMEOUT_MS = 6000;
 function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
-async function resolveStreamUrl(videoId) {
-  const bitrate = db.audioBitrate === '128' ? '128' : '64';
+async function resolveStreamUrlOnce(videoId, bitrate) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), RESOLVE_TIMEOUT_MS);
   try {
@@ -1510,6 +1509,25 @@ async function resolveStreamUrl(videoId) {
     return (result && result.url) || null;
   } catch (e) { return null; }
   finally { clearTimeout(timer); }
+}
+// A single failed attempt against the shared resolve service is very often
+// just a transient blip — a moment of rate-limiting, or the very first
+// request after the app has sat idle for hours — not a genuinely broken
+// track. Without a retry here, that one blip immediately counted as one of
+// the two consecutive failures handlePlaybackFailure allows before showing
+// "servizio non disponibile", which is exactly what made the message show
+// up so often right after reopening the app. One retry after a short
+// breather (so a real rate-limit gets a moment to clear rather than being
+// hit again instantly) absorbs that without weakening the real cascade
+// protection: something that fails twice in a row, twice over, is a much
+// stronger signal of an actual outage than a single fetch that happened to
+// time out once.
+async function resolveStreamUrl(videoId) {
+  const bitrate = db.audioBitrate === '128' ? '128' : '64';
+  const first = await resolveStreamUrlOnce(videoId, bitrate);
+  if (first) return first;
+  await delay(900);
+  return resolveStreamUrlOnce(videoId, bitrate);
 }
 
 // Resolving a stream URL is the slow, third-party-dependent step (cobalt
