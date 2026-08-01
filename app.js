@@ -1498,36 +1498,100 @@ const audioEl = $('#audioEl');
 // certainly what "sometimes minutes" was actually coming from.
 const RESOLVE_TIMEOUT_MS = 6000;
 function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+// Surfaced directly in the "servizio non disponibile" toast (see
+// handlePlaybackFailure) so the real reason is visible without needing to
+// open devtools — e.g. "HTTP 429" (rate limited), "HTTP 5xx" (the service
+// itself is erroring), or "timeout" (unreachable / hung).
+let lastResolveFailureReason = '';
 async function resolveStreamUrlOnce(videoId, bitrate) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), RESOLVE_TIMEOUT_MS);
   try {
-    const result = await Promise.race([
-      fetch(`${STREAM_PROXY_BASE}/streams/${videoId}?bitrate=${bitrate}`, { signal: controller.signal }).then((res) => (res.ok ? res.json() : null)),
+    const res = await Promise.race([
+      fetch(`${STREAM_PROXY_BASE}/streams/${videoId}?bitrate=${bitrate}`, { signal: controller.signal }),
       delay(RESOLVE_TIMEOUT_MS).then(() => null),
     ]);
-    return (result && result.url) || null;
+    if (!res) { lastResolveFailureReason = 'timeout'; console.warn(`[resolve] ${videoId} (${bitrate}k): timeout after ${RESOLVE_TIMEOUT_MS}ms`); return null; }
+    if (!res.ok) { lastResolveFailureReason = `HTTP ${res.status}`; console.warn(`[resolve] ${videoId} (${bitrate}k): HTTP ${res.status}`); return null; }
+    const data = await res.json();
+    if (!data || !data.url) { lastResolveFailureReason = 'risposta vuota'; console.warn(`[resolve] ${videoId} (${bitrate}k): risposta senza url`, data); return null; }
+    return data.url;
+  } catch (e) { lastResolveFailureReason = e.name === 'AbortError' ? 'timeout' : (e.message || 'errore di rete'); console.warn(`[resolve] ${videoId} (${bitrate}k): ${lastResolveFailureReason}`); return null; }
+  finally { clearTimeout(timer); }
+}
+// Fallback source for when the primary service (cobalt, via the app's own
+// worker) can't reach YouTube at all — not a competitor to switch to, but
+// a second, INDEPENDENT project (Piped, https://piped.video) with its own
+// separate network of public instances run by different people. A block
+// that takes cobalt down doesn't necessarily take Piped down too, which is
+// what makes this a real fallback rather than just another attempt at the
+// same failure. Snapshot of public instances as of mid-2026 — instances
+// come and go over time; if this fallback ever stops helping, the current
+// list lives at https://github.com/TeamPiped/Piped/wiki/Instances and can
+// be swapped in here.
+const PIPED_INSTANCES = [
+  'https://pipedapi.kavin.rocks',
+  'https://pipedapi.leptons.xyz',
+  'https://pipedapi.syncpundit.io',
+  'https://piped-api.privacy.com.de',
+  'https://pipedapi.adminforge.de',
+];
+async function resolveViaPipedInstance(base, videoId, targetKbps) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), RESOLVE_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${base}/streams/${videoId}`, { signal: controller.signal });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const streams = (data && data.audioStreams) || [];
+    if (!streams.length) return null;
+    // Pick whichever audio stream's bitrate is closest to what the user
+    // asked for, rather than assuming any particular quality is offered.
+    const targetBps = targetKbps * 1000;
+    const audioOnly = streams.filter((s) => s.url && (s.mimeType || '').startsWith('audio'));
+    audioOnly.sort((a, b) => Math.abs((a.bitrate || 0) - targetBps) - Math.abs((b.bitrate || 0) - targetBps));
+    return audioOnly[0] ? audioOnly[0].url : null;
   } catch (e) { return null; }
   finally { clearTimeout(timer); }
 }
-// A single failed attempt against the shared resolve service is very often
-// just a transient blip — a moment of rate-limiting, or the very first
-// request after the app has sat idle for hours — not a genuinely broken
-// track. Without a retry here, that one blip immediately counted as one of
-// the two consecutive failures handlePlaybackFailure allows before showing
-// "servizio non disponibile", which is exactly what made the message show
-// up so often right after reopening the app. One retry after a short
-// breather (so a real rate-limit gets a moment to clear rather than being
-// hit again instantly) absorbs that without weakening the real cascade
-// protection: something that fails twice in a row, twice over, is a much
-// stronger signal of an actual outage than a single fetch that happened to
-// time out once.
+// Fans out to several Piped instances AT ONCE (not one after another) and
+// runs with whichever answers first — this is what keeps the fallback tier
+// fast despite trying multiple servers: total wait is bounded by the
+// slowest of the batch, not the sum of all of them.
+async function resolveViaPiped(videoId, targetKbps) {
+  const attempts = PIPED_INSTANCES.map((base) =>
+    resolveViaPipedInstance(base, videoId, targetKbps).then((url) => {
+      if (!url) throw new Error('empty');
+      return url;
+    })
+  );
+  try { return await Promise.any(attempts); } catch (e) { return null; }
+}
+// A single failed attempt against cobalt is very often just a transient
+// blip — a moment of rate-limiting, or the very first request after the
+// app has sat idle for hours — not a genuinely broken track or a real
+// outage. Two attempts with a breather in between (so a real rate-limit
+// gets a real moment to clear rather than being hit again instantly)
+// absorb that. If cobalt is still failing after both, that's a strong
+// enough signal to stop retrying the SAME service and switch to the
+// independent Piped fallback above instead — trying it a third time
+// wouldn't teach us anything a different provider can't answer faster.
+// Diagnostics: open the browser console to see exactly why a resolve
+// failed (timeout, HTTP status, empty response) — that's the fastest way
+// to tell a transient hiccup apart from the extraction service itself
+// being down or blocked.
 async function resolveStreamUrl(videoId) {
   const bitrate = db.audioBitrate === '128' ? '128' : '64';
   const first = await resolveStreamUrlOnce(videoId, bitrate);
   if (first) return first;
   await delay(900);
-  return resolveStreamUrlOnce(videoId, bitrate);
+  const second = await resolveStreamUrlOnce(videoId, bitrate);
+  if (second) return second;
+  lastResolveFailureReason = 'cobalt non disponibile, provo un servizio alternativo…';
+  const piped = await resolveViaPiped(videoId, Number(bitrate));
+  if (piped) { lastResolveFailureReason = ''; return piped; }
+  lastResolveFailureReason = 'entrambi i servizi non hanno risposto';
+  return null;
 }
 
 // Resolving a stream URL is the slow, third-party-dependent step (cobalt
@@ -1643,7 +1707,8 @@ function handlePlaybackFailure() {
   consecutiveFailures++;
   if (consecutiveFailures >= 2) {
     playbackNeedsRetry = true;
-    showToast('Servizio non disponibile al momento — tocca play per riprovare');
+    const reason = lastResolveFailureReason ? ` (${lastResolveFailureReason})` : '';
+    showToast(`Servizio non disponibile${reason} — tocca play per riprovare`);
     player.isPlaying = false;
     updatePlayerUI();
     return;
