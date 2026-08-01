@@ -1559,6 +1559,17 @@ function fetchWithTimeout(url, ms) {
   const timer = setTimeout(() => controller.abort(), ms);
   return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
 }
+// Some directories list onion/i2p/Yggdrasil mirrors alongside normal ones
+// — those need special network software to even resolve, so a regular
+// browser fetch to them fails immediately and just wastes a slot in the
+// fan-out. Filtered out here rather than trusting the directory's own
+// "type" field, which doesn't always catch every non-standard address.
+function isReachableInstance(url) {
+  try {
+    const h = new URL(url).hostname;
+    return !/\.(onion|i2p|ygg)$/i.test(h) && !h.includes('.ygg.');
+  } catch (e) { return false; }
+}
 let cachedInstanceLists = null; // { piped: [...], invidious: [...] } | null
 async function discoverFallbackInstances() {
   if (cachedInstanceLists) return cachedInstanceLists;
@@ -1567,18 +1578,24 @@ async function discoverFallbackInstances() {
       fetchWithTimeout('https://piped-instances.kavin.rocks/', 4000)
         .then((r) => r.json())
         .then((list) => list.map((i) => i.api_url).filter(Boolean))
-        .catch(() => PIPED_INSTANCES_FALLBACK),
+        .catch(() => []),
       fetchWithTimeout('https://api.invidious.io/instances.json?sort_by=type,health', 4000)
         .then((r) => r.json())
         .then((list) => list
           .map(([, info]) => info)
           .filter((info) => info && info.type === 'https' && info.api !== false && info.uri)
           .map((info) => info.uri))
-        .catch(() => INVIDIOUS_INSTANCES_FALLBACK),
+        .catch(() => []),
     ]);
+    // Union of dynamic + static, deduped and filtered — the live directory
+    // is the priority source (it reflects what's actually up right now),
+    // but merging in the static snapshot instead of discarding it widens
+    // the pool for extra redundancy rather than betting everything on
+    // however many entries the directory happens to return at this moment.
+    const dedupe = (arr) => [...new Set(arr)].filter(isReachableInstance);
     cachedInstanceLists = {
-      piped: (piped && piped.length ? piped : PIPED_INSTANCES_FALLBACK).slice(0, 6),
-      invidious: (invidious && invidious.length ? invidious : INVIDIOUS_INSTANCES_FALLBACK).slice(0, 6),
+      piped: dedupe([...piped, ...PIPED_INSTANCES_FALLBACK]).slice(0, 8),
+      invidious: dedupe([...invidious, ...INVIDIOUS_INSTANCES_FALLBACK]).slice(0, 8),
     };
   } catch (e) {
     // Belt and suspenders: whatever went wrong, fall back to the static
