@@ -1589,24 +1589,29 @@ async function discoverFallbackInstances() {
   return cachedInstanceLists;
 }
 async function resolveViaPipedInstance(base, videoId, targetKbps) {
+  const host = new URL(base).hostname;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), RESOLVE_TIMEOUT_MS);
   try {
     const res = await fetch(`${base}/streams/${videoId}`, { signal: controller.signal });
-    if (!res.ok) return null;
+    if (!res.ok) throw new Error(`${host}: HTTP ${res.status}`);
     const data = await res.json();
     const streams = (data && data.audioStreams) || [];
-    if (!streams.length) return null;
+    if (!streams.length) throw new Error(`${host}: nessuno stream audio`);
     // Pick whichever audio stream's bitrate is closest to what the user
     // asked for, rather than assuming any particular quality is offered.
     const targetBps = targetKbps * 1000;
     const audioOnly = streams.filter((s) => s.url && (s.mimeType || '').startsWith('audio'));
     audioOnly.sort((a, b) => Math.abs((a.bitrate || 0) - targetBps) - Math.abs((b.bitrate || 0) - targetBps));
-    return audioOnly[0] ? audioOnly[0].url : null;
-  } catch (e) { return null; }
-  finally { clearTimeout(timer); }
+    if (!audioOnly[0]) throw new Error(`${host}: nessuno stream audio`);
+    return audioOnly[0].url;
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error(`${host}: timeout`);
+    throw (e.message && e.message.startsWith(host)) ? e : new Error(`${host}: ${e.message || 'errore di rete'}`);
+  } finally { clearTimeout(timer); }
 }
 async function resolveViaInvidiousInstance(base, videoId, targetKbps) {
+  const host = new URL(base).hostname;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), RESOLVE_TIMEOUT_MS);
   try {
@@ -1615,31 +1620,41 @@ async function resolveViaInvidiousInstance(base, videoId, targetKbps) {
     // to the IP that originally requested them, so the browser fetching
     // one directly would just get a 403.
     const res = await fetch(`${base}/api/v1/videos/${videoId}?local=true`, { signal: controller.signal });
-    if (!res.ok) return null;
+    if (!res.ok) throw new Error(`${host}: HTTP ${res.status}`);
     const data = await res.json();
     const formats = (data && data.adaptiveFormats) || [];
     const targetBps = targetKbps * 1000;
     const audioOnly = formats.filter((f) => f.url && (f.type || '').startsWith('audio'));
     audioOnly.sort((a, b) => Math.abs((a.bitrate || 0) - targetBps) - Math.abs((b.bitrate || 0) - targetBps));
     const pick = audioOnly[0];
-    if (!pick) return null;
+    if (!pick) throw new Error(`${host}: nessuno stream audio`);
     return pick.url.startsWith('http') ? pick.url : `${base}${pick.url}`;
-  } catch (e) { return null; }
-  finally { clearTimeout(timer); }
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error(`${host}: timeout`);
+    throw (e.message && e.message.startsWith(host)) ? e : new Error(`${host}: ${e.message || 'errore di rete'}`);
+  } finally { clearTimeout(timer); }
 }
 // Fans out to several instances of a given provider AT ONCE (not one after
 // another) and runs with whichever answers first — this is what keeps
 // each fallback tier fast despite trying multiple servers: total wait is
-// bounded by the slowest of the batch, not the sum of all of them.
+// bounded by the slowest of the batch, not the sum of all of them. On
+// total failure, returns a short deduplicated summary of every instance's
+// actual error ("host: HTTP 403 (x3), host2: timeout (x2)") instead of a
+// flat "didn't work" — this is what lets the final toast tell the user
+// exactly what went wrong on each provider without ever opening devtools.
 async function resolveViaProvider(instances, resolver, videoId, targetKbps) {
-  if (!instances.length) return null;
-  const attempts = instances.map((base) =>
-    resolver(base, videoId, targetKbps).then((url) => {
-      if (!url) throw new Error('empty');
-      return url;
-    })
-  );
-  try { return await Promise.any(attempts); } catch (e) { return null; }
+  if (!instances.length) return { url: null, detail: 'nessuna istanza nota' };
+  const attempts = instances.map((base) => resolver(base, videoId, targetKbps));
+  try {
+    const url = await Promise.any(attempts);
+    return { url, detail: '' };
+  } catch (e) {
+    const messages = (e && e.errors ? e.errors : [e]).map((err) => (err && err.message) || 'errore sconosciuto');
+    const counts = {};
+    messages.forEach((m) => { counts[m] = (counts[m] || 0) + 1; });
+    const detail = Object.entries(counts).map(([m, c]) => (c > 1 ? `${m} (x${c})` : m)).join(', ');
+    return { url: null, detail };
+  }
 }
 // A single failed attempt against cobalt is very often just a transient
 // blip — a moment of rate-limiting, or the very first request after the
@@ -1661,17 +1676,21 @@ async function resolveStreamUrl(videoId) {
   await delay(900);
   const second = await resolveStreamUrlOnce(videoId, bitrate);
   if (second) return second;
+  const cobaltDetail = lastResolveFailureReason;
 
   lastResolveFailureReason = 'cobalt non disponibile, provo servizi alternativi…';
   const { piped, invidious } = await discoverFallbackInstances();
 
-  const pipedUrl = await resolveViaProvider(piped, resolveViaPipedInstance, videoId, Number(bitrate));
-  if (pipedUrl) { lastResolveFailureReason = ''; return pipedUrl; }
+  const pipedResult = await resolveViaProvider(piped, resolveViaPipedInstance, videoId, Number(bitrate));
+  if (pipedResult.url) { lastResolveFailureReason = ''; return pipedResult.url; }
 
-  const invidiousUrl = await resolveViaProvider(invidious, resolveViaInvidiousInstance, videoId, Number(bitrate));
-  if (invidiousUrl) { lastResolveFailureReason = ''; return invidiousUrl; }
+  const invidiousResult = await resolveViaProvider(invidious, resolveViaInvidiousInstance, videoId, Number(bitrate));
+  if (invidiousResult.url) { lastResolveFailureReason = ''; return invidiousResult.url; }
 
-  lastResolveFailureReason = 'nessuno dei tre servizi ha risposto';
+  // Full, specific picture of what happened on all three independent
+  // providers — meant to be read directly in the app (see the toast in
+  // handlePlaybackFailure), no devtools required.
+  lastResolveFailureReason = `cobalt: ${cobaltDetail} · piped: ${pipedResult.detail} · invidious: ${invidiousResult.detail}`;
   return null;
 }
 
@@ -1789,7 +1808,7 @@ function handlePlaybackFailure() {
   if (consecutiveFailures >= 2) {
     playbackNeedsRetry = true;
     const reason = lastResolveFailureReason ? ` (${lastResolveFailureReason})` : '';
-    showToast(`Servizio non disponibile${reason} — tocca play per riprovare`);
+    showToast(`Servizio non disponibile${reason} — tocca play per riprovare`, 15000);
     player.isPlaying = false;
     updatePlayerUI();
     return;
