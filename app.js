@@ -1525,17 +1525,69 @@ async function resolveStreamUrlOnce(videoId, bitrate) {
 // separate network of public instances run by different people. A block
 // that takes cobalt down doesn't necessarily take Piped down too, which is
 // what makes this a real fallback rather than just another attempt at the
-// same failure. Snapshot of public instances as of mid-2026 — instances
-// come and go over time; if this fallback ever stops helping, the current
-// list lives at https://github.com/TeamPiped/Piped/wiki/Instances and can
-// be swapped in here.
-const PIPED_INSTANCES = [
+// same failure.
+//
+// Instance discovery is DYNAMIC rather than a hardcoded list: Piped
+// publishes a live directory of its current public instances at
+// piped-instances.kavin.rocks, so this asks that directory which instances
+// are up RIGHT NOW instead of trusting a snapshot that inevitably goes
+// stale as instances come and go over months. The hardcoded array below is
+// only the last-resort fallback for the rare case the directory itself is
+// unreachable.
+const PIPED_INSTANCES_FALLBACK = [
   'https://pipedapi.kavin.rocks',
   'https://pipedapi.leptons.xyz',
   'https://pipedapi.syncpundit.io',
   'https://piped-api.privacy.com.de',
   'https://pipedapi.adminforge.de',
 ];
+// Same idea, third independent project (Invidious, https://invidious.io),
+// same dynamic-directory approach via api.invidious.io. Historically more
+// prone to being blocked than Piped, but it's free, fully independent, and
+// costs nothing to try after the other two.
+const INVIDIOUS_INSTANCES_FALLBACK = [
+  'https://yewtu.be',
+  'https://inv.nadeko.net',
+  'https://invidious.nerdvpn.de',
+];
+// A directory fetch is itself a network call that can fail/be slow, and
+// it's the same handful of instances for every track anyway — so the
+// result is cached for the session instead of re-fetched every time a
+// track needs resolving.
+function fetchWithTimeout(url, ms) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+let cachedInstanceLists = null; // { piped: [...], invidious: [...] } | null
+async function discoverFallbackInstances() {
+  if (cachedInstanceLists) return cachedInstanceLists;
+  try {
+    const [piped, invidious] = await Promise.all([
+      fetchWithTimeout('https://piped-instances.kavin.rocks/', 4000)
+        .then((r) => r.json())
+        .then((list) => list.map((i) => i.api_url).filter(Boolean))
+        .catch(() => PIPED_INSTANCES_FALLBACK),
+      fetchWithTimeout('https://api.invidious.io/instances.json?sort_by=type,health', 4000)
+        .then((r) => r.json())
+        .then((list) => list
+          .map(([, info]) => info)
+          .filter((info) => info && info.type === 'https' && info.api !== false && info.uri)
+          .map((info) => info.uri))
+        .catch(() => INVIDIOUS_INSTANCES_FALLBACK),
+    ]);
+    cachedInstanceLists = {
+      piped: (piped && piped.length ? piped : PIPED_INSTANCES_FALLBACK).slice(0, 6),
+      invidious: (invidious && invidious.length ? invidious : INVIDIOUS_INSTANCES_FALLBACK).slice(0, 6),
+    };
+  } catch (e) {
+    // Belt and suspenders: whatever went wrong, fall back to the static
+    // snapshots rather than letting a directory-discovery hiccup take down
+    // the whole fallback chain.
+    cachedInstanceLists = { piped: PIPED_INSTANCES_FALLBACK, invidious: INVIDIOUS_INSTANCES_FALLBACK };
+  }
+  return cachedInstanceLists;
+}
 async function resolveViaPipedInstance(base, videoId, targetKbps) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), RESOLVE_TIMEOUT_MS);
@@ -1554,13 +1606,35 @@ async function resolveViaPipedInstance(base, videoId, targetKbps) {
   } catch (e) { return null; }
   finally { clearTimeout(timer); }
 }
-// Fans out to several Piped instances AT ONCE (not one after another) and
-// runs with whichever answers first — this is what keeps the fallback tier
-// fast despite trying multiple servers: total wait is bounded by the
-// slowest of the batch, not the sum of all of them.
-async function resolveViaPiped(videoId, targetKbps) {
-  const attempts = PIPED_INSTANCES.map((base) =>
-    resolveViaPipedInstance(base, videoId, targetKbps).then((url) => {
+async function resolveViaInvidiousInstance(base, videoId, targetKbps) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), RESOLVE_TIMEOUT_MS);
+  try {
+    // local=true makes Invidious proxy the audio through its own domain
+    // instead of handing back a raw googlevideo.com URL — those are bound
+    // to the IP that originally requested them, so the browser fetching
+    // one directly would just get a 403.
+    const res = await fetch(`${base}/api/v1/videos/${videoId}?local=true`, { signal: controller.signal });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const formats = (data && data.adaptiveFormats) || [];
+    const targetBps = targetKbps * 1000;
+    const audioOnly = formats.filter((f) => f.url && (f.type || '').startsWith('audio'));
+    audioOnly.sort((a, b) => Math.abs((a.bitrate || 0) - targetBps) - Math.abs((b.bitrate || 0) - targetBps));
+    const pick = audioOnly[0];
+    if (!pick) return null;
+    return pick.url.startsWith('http') ? pick.url : `${base}${pick.url}`;
+  } catch (e) { return null; }
+  finally { clearTimeout(timer); }
+}
+// Fans out to several instances of a given provider AT ONCE (not one after
+// another) and runs with whichever answers first — this is what keeps
+// each fallback tier fast despite trying multiple servers: total wait is
+// bounded by the slowest of the batch, not the sum of all of them.
+async function resolveViaProvider(instances, resolver, videoId, targetKbps) {
+  if (!instances.length) return null;
+  const attempts = instances.map((base) =>
+    resolver(base, videoId, targetKbps).then((url) => {
       if (!url) throw new Error('empty');
       return url;
     })
@@ -1587,10 +1661,17 @@ async function resolveStreamUrl(videoId) {
   await delay(900);
   const second = await resolveStreamUrlOnce(videoId, bitrate);
   if (second) return second;
-  lastResolveFailureReason = 'cobalt non disponibile, provo un servizio alternativo…';
-  const piped = await resolveViaPiped(videoId, Number(bitrate));
-  if (piped) { lastResolveFailureReason = ''; return piped; }
-  lastResolveFailureReason = 'entrambi i servizi non hanno risposto';
+
+  lastResolveFailureReason = 'cobalt non disponibile, provo servizi alternativi…';
+  const { piped, invidious } = await discoverFallbackInstances();
+
+  const pipedUrl = await resolveViaProvider(piped, resolveViaPipedInstance, videoId, Number(bitrate));
+  if (pipedUrl) { lastResolveFailureReason = ''; return pipedUrl; }
+
+  const invidiousUrl = await resolveViaProvider(invidious, resolveViaInvidiousInstance, videoId, Number(bitrate));
+  if (invidiousUrl) { lastResolveFailureReason = ''; return invidiousUrl; }
+
+  lastResolveFailureReason = 'nessuno dei tre servizi ha risposto';
   return null;
 }
 
