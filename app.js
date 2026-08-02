@@ -55,6 +55,7 @@ const ICONS = {
   starOutline: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 2l2.9 6.6L22 9.3l-5 4.9 1.2 7.1L12 17.8 5.8 21.3 7 14.2 2 9.3l7.1-.7z"/></svg>`,
   folder: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/></svg>`,
   upload: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21V9"/><path d="m7 14 5-5 5 5"/><path d="M4.5 19h15"/></svg>`,
+  link: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 14.5l5-5"/><path d="M12.8 6.2l1.4-1.4a3.6 3.6 0 0 1 5.1 5.1L17.8 11.4"/><path d="M11.2 17.8l-1.4 1.4a3.6 3.6 0 0 1-5.1-5.1L6.2 12.6"/></svg>`,
 };
 
 /* =========================================================
@@ -858,6 +859,11 @@ function renderLibrary() {
   }
   if (filter === 'all' || filter === 'offline') {
     rows.push({ type: 'offline' });
+    // Playlist offline: appaiono qui come voci proprie della libreria (con
+    // un badge viola per riconoscerle a colpo d'occhio), NON annidate
+    // dentro la cartella Offline — quella resta solo il pool piatto di
+    // tutti i brani scaricati, senza sotto-struttura.
+    db.offlinePlaylists.forEach((p) => rows.push({ type: 'offlinePlaylist', playlist: p }));
   }
   let artistRows = [];
   if (filter === 'all' || filter === 'artists') {
@@ -875,6 +881,9 @@ function renderLibrary() {
   refreshNowPlayingHighlight();
 }
 
+function offlineBadgeHtml() {
+  return `<span class="offline-badge" title="Playlist offline"><span class="ic">${ICONS.download}</span></span>`;
+}
 function libRowHtml(r) {
   if (r.type === 'liked') {
     return `<button type="button" class="lib-row" data-lib-type="liked">
@@ -886,6 +895,15 @@ function libRowHtml(r) {
     return `<button type="button" class="lib-row" data-lib-type="offline">
       <div class="lib-row-img offline-cover-tile"><span class="ic" style="width:20px;height:20px">${ICONS.download}</span></div>
       <div><div class="lib-row-title">Offline</div><div class="lib-row-sub">${db.offlineTracks.length} brani scaricati</div></div>
+    </button>`;
+  }
+  if (r.type === 'offlinePlaylist') {
+    const cover = r.playlist.coverDataUrl
+      ? `<img class="lib-row-img" src="${r.playlist.coverDataUrl}" alt="" />`
+      : `<div class="lib-row-img" style="display:flex;align-items:center;justify-content:center;background:var(--surface-2)"><span class="ic" style="color:var(--text-secondary)">${ICONS.library(false)}</span></div>`;
+    return `<button type="button" class="lib-row" data-lib-type="offlinePlaylist" data-playlist-id="${r.playlist.id}">
+      <div class="lib-row-img-wrap">${cover}${offlineBadgeHtml()}</div>
+      <div><div class="lib-row-title">${escapeHtml(r.playlist.name)}</div><div class="lib-row-sub">Playlist offline · ${r.playlist.trackIds.length} brani</div></div>
     </button>`;
   }
   if (r.type === 'playlist') {
@@ -915,6 +933,15 @@ function libGridItemHtml(r) {
       <div class="card-body"><div class="card-title">Offline</div><div class="card-sub">${db.offlineTracks.length} brani</div></div>
     </button>`;
   }
+  if (r.type === 'offlinePlaylist') {
+    const cover = r.playlist.coverDataUrl
+      ? `<img src="${r.playlist.coverDataUrl}" alt="" />`
+      : `<span class="ic" style="color:var(--text-secondary)">${ICONS.library(false)}</span>`;
+    return `<button type="button" class="card" data-lib-type="offlinePlaylist" data-playlist-id="${r.playlist.id}" style="animation:none;opacity:1">
+      <div class="card-img-wrap" style="display:flex;align-items:center;justify-content:center;position:relative">${cover}${offlineBadgeHtml()}</div>
+      <div class="card-body"><div class="card-title">${escapeHtml(r.playlist.name)}</div><div class="card-sub">Playlist offline</div></div>
+    </button>`;
+  }
   if (r.type === 'playlist') {
     const cover = r.playlist.coverDataUrl
       ? `<img src="${r.playlist.coverDataUrl}" alt="" />`
@@ -934,6 +961,7 @@ function wireLibraryItems(root, all) {
   $$('[data-lib-type="offline"]', root).forEach((el) => el.addEventListener('click', () => openPlaylistDetail('offline')));
   $$('[data-lib-type="artist"]', root).forEach((el) => el.addEventListener('click', () => openArtistDetail(el.dataset.artistName)));
   $$('[data-lib-type="playlist"]', root).forEach((el) => el.addEventListener('click', () => openPlaylistDetail('playlist', el.dataset.playlistId)));
+  $$('[data-lib-type="offlinePlaylist"]', root).forEach((el) => el.addEventListener('click', () => openPlaylistDetail('offlinePlaylist', el.dataset.playlistId)));
 }
 function findKnownTrack(id) {
   return db.liked.find((t) => t.id === id) || db.recentTracks.find((t) => t.id === id) || db.offlineTracks.find((t) => t.id === id) || db.trackCache[id] || null;
@@ -1019,23 +1047,12 @@ function openPlaylistDetail(kind, playlistId) {
     return `<div class="pl-detail-cover" style="display:flex;align-items:center;justify-content:center;background:var(--surface-2)"><span class="ic" style="color:var(--text-secondary)">${ICONS.library(false)}</span></div>`;
   }
 
-  // The Offline root folder additionally surfaces its own, separate set of
-  // playlists (built only from downloaded tracks) — kept out of the main
-  // "Playlist" library list on purpose, since the request was specifically
-  // for playlists scoped to this section rather than more general ones.
-  function offlinePlaylistsSectionHtml() {
+  // The Offline root folder is now just the flat pool of every downloaded
+  // track — offline playlists have their own rows directly in the library
+  // list (see renderLibrary), so they're no longer nested in here too.
+  function offlineFlatHeaderHtml() {
     if (!isOfflineKind) return '';
-    const rows = db.offlinePlaylists.map((p) => `
-      <button type="button" class="lib-row" data-offline-pl-id="${p.id}">
-        ${p.coverDataUrl ? `<img class="lib-row-img" src="${p.coverDataUrl}" alt="" />` : `<div class="lib-row-img" style="display:flex;align-items:center;justify-content:center;background:var(--surface-2)"><span class="ic" style="color:var(--text-secondary)">${ICONS.library(false)}</span></div>`}
-        <div><div class="lib-row-title">${escapeHtml(p.name)}</div><div class="lib-row-sub">${p.trackIds.length} brani</div></div>
-      </button>`).join('');
-    return `<div class="pl-detail-section-title">Playlist offline${db.offlinePlaylists.length ? ` (${db.offlinePlaylists.length})` : ''}</div>
-      ${db.offlinePlaylists.length ? `<div class="lib-list" id="offlinePlaylistsList" style="margin-bottom:10px">${rows}</div>` : `<div class="offline-section-hint">Raggruppa i brani scaricati in playlist proprie, ad esempio importandone una da Spotify.</div>`}
-      <button type="button" class="pill-btn" id="offlineNewPlBtn" style="margin-bottom:18px"><span class="ic"></span><span>Crea playlist offline</span></button>
-      <div class="pl-detail-section-divider"></div>
-      <div class="pl-detail-section-title">Tutti i brani scaricati${db.offlineTracks.length ? ` (${db.offlineTracks.length})` : ''}</div>
-      ${db.offlinePlaylists.length ? '<div class="offline-section-hint">Include anche i brani già raccolti in una playlist qui sopra.</div>' : ''}`;
+    return `<div class="pl-detail-section-title">Brani scaricati${db.offlineTracks.length ? ` (${db.offlineTracks.length})` : ''}</div>`;
   }
 
   $('#modalRoot').innerHTML = `
@@ -1059,8 +1076,9 @@ function openPlaylistDetail(kind, playlistId) {
             <button type="button" class="modal-btn" id="plPlayBtn" style="width:auto;flex:1">Riproduci</button>
             <button type="button" class="pill-btn" id="plShuffleBtn"><span class="ic"></span><span>Casuale</span></button>
             ${(isOfflineKind || isOfflinePlaylistKind) ? '<button type="button" class="pill-btn" id="plExportBtn"><span class="ic"></span><span>Esporta</span></button>' : ''}
+            ${isOfflineKind ? '<button type="button" class="pill-btn" id="offlineNewPlBtn"><span class="ic"></span><span>Nuova playlist</span></button>' : ''}
           </div>
-          ${offlinePlaylistsSectionHtml()}
+          ${offlineFlatHeaderHtml()}
           <div id="plDetailBody">${tracks.length ? tracks.map((t) => trackRowHtml(t)).join('') : `<div class="empty-state">${isOfflineKind ? 'Nessun brano scaricato ancora — tocca l’icona di download su un brano per salvarlo qui.' : 'Nessun brano qui'}</div>`}</div>
         </div>
       </div>
@@ -1088,17 +1106,13 @@ function openPlaylistDetail(kind, playlistId) {
       close();
       showToast('Playlist eliminata');
       if (currentRoute === 'library') renderLibrary();
-      if (isOfflinePlaylistKind) openPlaylistDetail('offline'); // back to the offline folder, list refreshed
     });
   }
 
   if (isOfflineKind) {
     setIcon($('#offlineNewPlBtn'), ICONS.plus);
     $('#offlineNewPlBtn').addEventListener('click', () => {
-      openCreatePlaylistModal(() => openPlaylistDetail('offline'), db.offlinePlaylists, 'Nuova playlist offline');
-    });
-    $$('[data-offline-pl-id]', $('#modalRoot')).forEach((row) => {
-      row.addEventListener('click', () => openPlaylistDetail('offlinePlaylist', row.dataset.offlinePlId));
+      openCreatePlaylistModal(null, db.offlinePlaylists, 'Nuova playlist offline');
     });
   }
 
@@ -1171,7 +1185,7 @@ function setupLibraryHeader() {
   });
   setIcon($('#libraryAddBtn'), ICONS.plus);
   $('#libraryAddBtn').addEventListener('click', () => openCreatePlaylistModal());
-  setIcon($('#libraryImportBtn'), ICONS.upload);
+  setIcon($('#libraryImportBtn'), ICONS.link);
   $('#libraryImportBtn').addEventListener('click', () => openImportPlaylistModal());
 }
 
@@ -1458,10 +1472,12 @@ function openImportPlaylistModal() {
     if (!db.apiKey) { showToast('Serve prima una chiave YouTube API nelle impostazioni'); return; }
     body.innerHTML = `
       <div class="import-progress-summary" id="importProgressSummary">Preparazione di ${items.length} brani…</div>
+      <div class="import-rate-hint">Procedo un brano alla volta, con una piccola pausa tra uno e l'altro: è apposta, per non sovraccaricare il servizio di ricerca/streaming ed evitare che tutti i brani falliscano insieme.</div>
       <div id="importRowsList" class="import-rows-list"></div>
-      <button type="button" class="modal-btn" id="importDoneBtn" style="display:none">Fatto</button>`;
+      <div id="importActions"></div>`;
     const listEl = $('#importRowsList');
     const summaryEl = $('#importProgressSummary');
+    const actionsEl = $('#importActions');
     const results = items.map((it) => ({ ...it, status: 'pending' }));
     const renderRows = () => {
       listEl.innerHTML = results.map((r) => `
@@ -1472,45 +1488,75 @@ function openImportPlaylistModal() {
     };
     renderRows();
 
-    const matchedIds = [];
-    let okCount = 0, failCount = 0;
-    for (let i = 0; i < results.length; i++) {
-      const r = results[i];
-      summaryEl.textContent = `Brano ${i + 1} di ${results.length}…`;
+    let playlist = null;
+    function ensurePlaylist() {
+      if (playlist) return playlist;
+      playlist = { id: 'pl_' + Date.now(), name, trackIds: [], coverDataUrl: null };
+      (mode === 'offline' ? db.offlinePlaylists : db.playlists).push(playlist);
+      return playlist;
+    }
+
+    async function processRow(r) {
       r.status = 'searching'; renderRows();
       try {
         const query = [r.title, r.artist].filter(Boolean).join(' ');
         const found = await ytSearch(query, 1);
         const track = found && found[0];
-        if (!track) { r.status = 'nomatch'; failCount++; renderRows(); continue; }
+        if (!track) { r.status = 'nomatch'; return false; }
         db.trackCache[track.id] = { id: track.id, title: track.title, artist: track.artist, thumb: track.thumb };
         if (mode === 'offline' && !isOffline(track.id)) {
           r.status = 'downloading'; renderRows();
           await performDownload(track);
         }
-        r.status = 'done'; matchedIds.push(track.id); okCount++;
+        r.status = 'done';
+        const pl = ensurePlaylist();
+        if (!pl.trackIds.includes(track.id)) pl.trackIds.push(track.id);
+        return true;
       } catch (e) {
-        r.status = 'error'; failCount++;
+        r.status = 'error';
+        return false;
+      } finally { renderRows(); }
+    }
+    // Un brano alla volta, con una pausa tra uno e l'altro: bombardare il
+    // servizio di risoluzione streaming con decine di richieste consecutive
+    // è la causa più comune di un fallimento "in blocco" di tutti i brani.
+    async function runPass(rows) {
+      let ok = 0, fail = 0;
+      for (let i = 0; i < rows.length; i++) {
+        if (i > 0) await delay(mode === 'offline' ? 900 + Math.random() * 500 : 350);
+        summaryEl.textContent = `Brano ${i + 1} di ${rows.length}…`;
+        const success = await processRow(rows[i]);
+        if (success) ok++; else fail++;
       }
-      renderRows();
+      return { ok, fail };
     }
 
-    let newPlaylistId = null;
-    if (matchedIds.length) {
-      const playlist = { id: 'pl_' + Date.now(), name, trackIds: matchedIds, coverDataUrl: null };
-      (mode === 'offline' ? db.offlinePlaylists : db.playlists).push(playlist);
-      newPlaylistId = playlist.id;
+    function finishPass(okCount, failCount) {
+      summaryEl.textContent = mode === 'offline'
+        ? `Completato: ${okCount} scaricati, ${failCount} non trovati/falliti in questo giro.`
+        : `Completato: ${okCount} trovati, ${failCount} non trovati/falliti in questo giro.`;
+      if (currentRoute === 'library') renderLibrary();
+      const failedRows = results.filter((r) => r.status === 'nomatch' || r.status === 'error');
+      actionsEl.innerHTML = `
+        ${failedRows.length ? `<button type="button" class="modal-btn modal-btn-ghost" id="importRetryBtn">Riprova i ${failedRows.length} falliti</button>` : ''}
+        <button type="button" class="modal-btn" id="importDoneBtn">Fatto</button>`;
+      if (failedRows.length) {
+        $('#importRetryBtn').addEventListener('click', async () => {
+          actionsEl.innerHTML = '';
+          const retryResult = await runPass(failedRows);
+          saveDB();
+          finishPass(retryResult.ok, retryResult.fail);
+        });
+      }
+      $('#importDoneBtn').addEventListener('click', () => {
+        close();
+        if (playlist) openPlaylistDetail(mode === 'offline' ? 'offlinePlaylist' : 'playlist', playlist.id);
+      });
     }
+
+    const first = await runPass(results);
     saveDB();
-    summaryEl.textContent = mode === 'offline'
-      ? `Completato: ${okCount} scaricati, ${failCount} non trovati/falliti.`
-      : `Completato: ${okCount} trovati, ${failCount} non trovati/falliti.`;
-    if (currentRoute === 'library') renderLibrary();
-    $('#importDoneBtn').style.display = '';
-    $('#importDoneBtn').addEventListener('click', () => {
-      close();
-      if (newPlaylistId) openPlaylistDetail(mode === 'offline' ? 'offlinePlaylist' : 'playlist', newPlaylistId);
-    });
+    finishPass(first.ok, first.fail);
   }
 
   showLinkStep();
