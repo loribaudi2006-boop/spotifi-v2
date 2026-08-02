@@ -53,6 +53,8 @@ const ICONS = {
   download: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4.5 19h15"/></svg>`,
   trash: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>`,
   starOutline: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 2l2.9 6.6L22 9.3l-5 4.9 1.2 7.1L12 17.8 5.8 21.3 7 14.2 2 9.3l7.1-.7z"/></svg>`,
+  folder: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/></svg>`,
+  upload: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21V9"/><path d="m7 14 5-5 5 5"/><path d="M4.5 19h15"/></svg>`,
 };
 
 /* =========================================================
@@ -70,12 +72,14 @@ function defaultDB() {
   return {
     apiKey: '',
     audioBitrate: '64',
+    instantStreaming: false, // true = salta l'upgrade a blob di qualità, resta sullo stream diretto (più veloce, meno dati)
     liked: [],
     recentTracks: [],
     playlists: [],
     offlineTracks: [],
     offlinePlaylists: [],
     savedArtists: [],
+    trackCache: {}, // id -> {id,title,artist,thumb} — metadata for tracks matched via Spotify import but not (necessarily) downloaded, so "normal" imported playlists can still stream them
     libraryLayout: 'list',
     libraryFilter: 'all',
     profile: { name: '', photoDataUrl: null },
@@ -94,17 +98,156 @@ function saveDB() { localStorage.setItem(DB_KEY, JSON.stringify(db)); }
    ========================================================= */
 const OFFLINE_DB_NAME = 'spotifi_offline_v1';
 const OFFLINE_STORE = 'audio';
+const KV_STORE = 'kv'; // small store for things that can't live in localStorage/JSON, e.g. a FileSystemDirectoryHandle
 let offlineDbPromise = null;
 function openOfflineDb() {
   if (offlineDbPromise) return offlineDbPromise;
   offlineDbPromise = new Promise((resolve, reject) => {
     if (!('indexedDB' in window)) { reject(new Error('IndexedDB non supportato')); return; }
-    const req = indexedDB.open(OFFLINE_DB_NAME, 1);
-    req.onupgradeneeded = () => { req.result.createObjectStore(OFFLINE_STORE); };
+    const req = indexedDB.open(OFFLINE_DB_NAME, 2);
+    req.onupgradeneeded = (e) => {
+      const idb = req.result;
+      if (!idb.objectStoreNames.contains(OFFLINE_STORE)) idb.createObjectStore(OFFLINE_STORE);
+      if (!idb.objectStoreNames.contains(KV_STORE)) idb.createObjectStore(KV_STORE);
+    };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
   return offlineDbPromise;
+}
+function kvSet(key, value) {
+  return openOfflineDb().then((idb) => new Promise((resolve, reject) => {
+    const tx = idb.transaction(KV_STORE, 'readwrite');
+    tx.objectStore(KV_STORE).put(value, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  }));
+}
+function kvGet(key) {
+  return openOfflineDb().then((idb) => new Promise((resolve, reject) => {
+    const tx = idb.transaction(KV_STORE, 'readonly');
+    const req = tx.objectStore(KV_STORE).get(key);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  }));
+}
+function kvDelete(key) {
+  return openOfflineDb().then((idb) => new Promise((resolve, reject) => {
+    const tx = idb.transaction(KV_STORE, 'readwrite');
+    tx.objectStore(KV_STORE).delete(key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  }));
+}
+
+/* =========================================================
+   Cartella di salvataggio sul dispositivo (File System Access API)
+   — disponibile su Chrome/Edge desktop e su Chrome Android, NON su
+   iOS/Safari (Apple non la supporta, in nessun browser su iPhone,
+   PWA incluse: è un limite della piattaforma, non dell'app). Su iOS
+   l'equivalente è "Esporta" più sotto, che passa dal normale foglio
+   di salvataggio di Safari (l'utente sceglie lì la cartella/app,
+   es. File > Su iPhone / iCloud Drive).
+   ========================================================= */
+const hasDirPicker = typeof window.showDirectoryPicker === 'function';
+let saveDirHandle = null; // cached in memory once loaded/picked
+let saveDirHandleLoaded = false;
+async function loadSaveDirHandle() {
+  if (saveDirHandleLoaded) return saveDirHandle;
+  saveDirHandleLoaded = true;
+  if (!hasDirPicker) return null;
+  try { saveDirHandle = await kvGet('saveDirHandle'); } catch (e) { saveDirHandle = null; }
+  return saveDirHandle;
+}
+async function ensureDirPermission(handle) {
+  if (!handle) return false;
+  try {
+    const opts = { mode: 'readwrite' };
+    if ((await handle.queryPermission(opts)) === 'granted') return true;
+    return (await handle.requestPermission(opts)) === 'granted';
+  } catch (e) { return false; }
+}
+async function pickSaveDir() {
+  if (!hasDirPicker) throw new Error('non supportato su questo browser');
+  const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+  saveDirHandle = handle;
+  saveDirHandleLoaded = true;
+  await kvSet('saveDirHandle', handle);
+  return handle;
+}
+async function clearSaveDir() {
+  saveDirHandle = null;
+  try { await kvDelete('saveDirHandle'); } catch (e) { /* ignore */ }
+}
+function sanitizeFileName(name) {
+  return name.replace(/[\\/:*?"<>|]/g, '-').trim().slice(0, 120);
+}
+function fileExtForBlob(blob) {
+  const type = (blob && blob.type) || '';
+  if (type.includes('webm')) return 'webm';
+  if (type.includes('mp4') || type.includes('m4a') || type.includes('aac')) return 'm4a';
+  if (type.includes('ogg')) return 'ogg';
+  return 'mp3';
+}
+// Best-effort copy of a downloaded track's bytes into the user-chosen
+// device folder, in addition to the app's own IndexedDB copy (which stays
+// the source of truth for in-app playback). Never throws — a failure here
+// must not affect the "downloaded for offline" state.
+async function writeTrackToSaveDir(track, blob) {
+  await loadSaveDirHandle();
+  if (!saveDirHandle) return;
+  if (!(await ensureDirPermission(saveDirHandle))) return;
+  try {
+    const filename = `${sanitizeFileName(track.artist || 'Sconosciuto')} - ${sanitizeFileName(track.title || track.id)}.${fileExtForBlob(blob)}`;
+    const fileHandle = await saveDirHandle.getFileHandle(filename, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(blob);
+    await writable.close();
+  } catch (e) { /* non fatale: il brano resta comunque salvato offline nell'app */ }
+}
+// Triggers the OS-level "save file" flow (Safari's share/save sheet on
+// iOS, the normal download bar on Android/desktop Chrome) so the user can
+// choose exactly where the file goes — the only folder-choice mechanism
+// iOS actually offers to web content.
+function triggerFileDownload(filename, blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+async function exportTrack(track) {
+  const blob = await getOfflineBlob(track.id);
+  if (!blob) { showToast('Scarica prima il brano per poterlo esportare'); return; }
+  const filename = `${sanitizeFileName(track.artist || 'Sconosciuto')} - ${sanitizeFileName(track.title || track.id)}.${fileExtForBlob(blob)}`;
+  triggerFileDownload(filename, blob);
+}
+// Bulk-exports every downloaded track of a playlist as a single .zip
+// (via JSZip, loaded lazily) — one save-dialog instead of N, which matters
+// a lot on iOS where each individual export needs a manual tap.
+async function exportPlaylistZip(tracks, zipName) {
+  const withBlobs = [];
+  for (const t of tracks) {
+    const blob = await getOfflineBlob(t.id);
+    if (blob) withBlobs.push({ t, blob });
+  }
+  if (!withBlobs.length) { showToast('Nessun brano scaricato in questa playlist'); return; }
+  if (typeof JSZip === 'undefined') { showToast('Impossibile creare lo zip (JSZip non caricato)'); return; }
+  showToast('Preparazione zip in corso…');
+  const zip = new JSZip();
+  const usedNames = new Set();
+  withBlobs.forEach(({ t, blob }) => {
+    let name = `${sanitizeFileName(t.artist || 'Sconosciuto')} - ${sanitizeFileName(t.title || t.id)}.${fileExtForBlob(blob)}`;
+    let i = 2;
+    while (usedNames.has(name)) { name = `${name.replace(/\.[a-z0-9]+$/, '')} (${i}).${fileExtForBlob(blob)}`; i++; }
+    usedNames.add(name);
+    zip.file(name, blob);
+  });
+  const zipBlob = await zip.generateAsync({ type: 'blob' });
+  triggerFileDownload(`${sanitizeFileName(zipName || 'Playlist')}.zip`, zipBlob);
 }
 function offlineBlobSet(id, blob) {
   return openOfflineDb().then((idb) => new Promise((resolve, reject) => {
@@ -151,21 +294,29 @@ function refreshDownloadUI(id) {
     btn.setAttribute('aria-label', downloaded ? 'Rimuovi download' : 'Scarica per l’ascolto offline');
   });
 }
+// Core download step, shared by the single-track download button and the
+// bulk Spotify-playlist importer below. Throws on failure; does not touch
+// downloadingIds/UI/toasts, since the two callers want different feedback.
+async function performDownload(track) {
+  const url = (await takePrefetchedStreamUrl(track)) || (await resolveStreamUrl(track.id));
+  if (!url) throw new Error('URL non risolto');
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('fetch fallita');
+  const blob = await res.blob();
+  await offlineBlobSet(track.id, blob);
+  db.offlineTracks = db.offlineTracks.filter((t) => t.id !== track.id);
+  db.offlineTracks.unshift({ id: track.id, title: track.title, artist: track.artist, thumb: track.thumb, downloadedAt: Date.now() });
+  saveDB();
+  writeTrackToSaveDir(track, blob); // best-effort, non-blocking
+  return blob;
+}
 async function downloadTrackOffline(track) {
   if (downloadingIds.has(track.id)) return;
   if (isOffline(track.id)) { removeOfflineTrack(track.id); return; }
   downloadingIds.add(track.id);
   refreshDownloadUI(track.id);
   try {
-    const url = (await takePrefetchedStreamUrl(track)) || (await resolveStreamUrl(track.id));
-    if (!url) throw new Error('URL non risolto');
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('fetch fallita');
-    const blob = await res.blob();
-    await offlineBlobSet(track.id, blob);
-    db.offlineTracks = db.offlineTracks.filter((t) => t.id !== track.id);
-    db.offlineTracks.unshift({ id: track.id, title: track.title, artist: track.artist, thumb: track.thumb, downloadedAt: Date.now() });
-    saveDB();
+    await performDownload(track);
     showToast('Brano salvato per l’ascolto offline');
     if (currentRoute === 'library') renderLibrary();
   } catch (e) {
@@ -785,7 +936,7 @@ function wireLibraryItems(root, all) {
   $$('[data-lib-type="playlist"]', root).forEach((el) => el.addEventListener('click', () => openPlaylistDetail('playlist', el.dataset.playlistId)));
 }
 function findKnownTrack(id) {
-  return db.liked.find((t) => t.id === id) || db.recentTracks.find((t) => t.id === id) || db.offlineTracks.find((t) => t.id === id) || null;
+  return db.liked.find((t) => t.id === id) || db.recentTracks.find((t) => t.id === id) || db.offlineTracks.find((t) => t.id === id) || db.trackCache[id] || null;
 }
 
 /* Generic swipe-down-to-dismiss for the shared .modal bottom-sheet
@@ -879,9 +1030,12 @@ function openPlaylistDetail(kind, playlistId) {
         ${p.coverDataUrl ? `<img class="lib-row-img" src="${p.coverDataUrl}" alt="" />` : `<div class="lib-row-img" style="display:flex;align-items:center;justify-content:center;background:var(--surface-2)"><span class="ic" style="color:var(--text-secondary)">${ICONS.library(false)}</span></div>`}
         <div><div class="lib-row-title">${escapeHtml(p.name)}</div><div class="lib-row-sub">${p.trackIds.length} brani</div></div>
       </button>`).join('');
-    return `<div class="pl-detail-section-title">Le tue playlist offline</div>
-      <div class="lib-list" id="offlinePlaylistsList" style="margin-bottom:14px">${rows}</div>
-      <button type="button" class="pill-btn" id="offlineNewPlBtn" style="margin-bottom:16px"><span class="ic"></span><span>Crea playlist offline</span></button>`;
+    return `<div class="pl-detail-section-title">Playlist offline${db.offlinePlaylists.length ? ` (${db.offlinePlaylists.length})` : ''}</div>
+      ${db.offlinePlaylists.length ? `<div class="lib-list" id="offlinePlaylistsList" style="margin-bottom:10px">${rows}</div>` : `<div class="offline-section-hint">Raggruppa i brani scaricati in playlist proprie, ad esempio importandone una da Spotify.</div>`}
+      <button type="button" class="pill-btn" id="offlineNewPlBtn" style="margin-bottom:18px"><span class="ic"></span><span>Crea playlist offline</span></button>
+      <div class="pl-detail-section-divider"></div>
+      <div class="pl-detail-section-title">Tutti i brani scaricati${db.offlineTracks.length ? ` (${db.offlineTracks.length})` : ''}</div>
+      ${db.offlinePlaylists.length ? '<div class="offline-section-hint">Include anche i brani già raccolti in una playlist qui sopra.</div>' : ''}`;
   }
 
   $('#modalRoot').innerHTML = `
@@ -904,6 +1058,7 @@ function openPlaylistDetail(kind, playlistId) {
           <div class="pl-detail-actions">
             <button type="button" class="modal-btn" id="plPlayBtn" style="width:auto;flex:1">Riproduci</button>
             <button type="button" class="pill-btn" id="plShuffleBtn"><span class="ic"></span><span>Casuale</span></button>
+            ${(isOfflineKind || isOfflinePlaylistKind) ? '<button type="button" class="pill-btn" id="plExportBtn"><span class="ic"></span><span>Esporta</span></button>' : ''}
           </div>
           ${offlinePlaylistsSectionHtml()}
           <div id="plDetailBody">${tracks.length ? tracks.map((t) => trackRowHtml(t)).join('') : `<div class="empty-state">${isOfflineKind ? 'Nessun brano scaricato ancora — tocca l’icona di download su un brano per salvarlo qui.' : 'Nessun brano qui'}</div>`}</div>
@@ -912,6 +1067,10 @@ function openPlaylistDetail(kind, playlistId) {
     </div>`;
   setIcon($('#plDetailCloseBtn'), ICONS.close);
   setIcon($('#plShuffleBtn'), ICONS.shuffle);
+  if ($('#plExportBtn')) {
+    setIcon($('#plExportBtn'), ICONS.share);
+    $('#plExportBtn').addEventListener('click', () => exportPlaylistZip(tracks, name));
+  }
   wireTrackRows($('#plDetailBody'), tracks, isOfflineKind ? { offlinePlaylists: true } : undefined);
 
   const close = () => { $('#modalRoot').innerHTML = ''; };
@@ -1012,6 +1171,8 @@ function setupLibraryHeader() {
   });
   setIcon($('#libraryAddBtn'), ICONS.plus);
   $('#libraryAddBtn').addEventListener('click', () => openCreatePlaylistModal());
+  setIcon($('#libraryImportBtn'), ICONS.upload);
+  $('#libraryImportBtn').addEventListener('click', () => openImportPlaylistModal());
 }
 
 /* =========================================================
@@ -1154,6 +1315,208 @@ function spawnHeartBurst(sourceEl) {
    ========================================================= */
 // onCreated(playlist) lets a caller (e.g. the add-to-playlist modal) chain
 // straight into "create a playlist, then add the pending track to it"
+/* =========================================================
+   Importa playlist Spotify — senza credenziali/API Spotify.
+   Flusso: 1) incolli il link della playlist → l'app prova a leggerne i
+   brani tramite un endpoint del tuo stesso Worker (spotifi-stream-proxy),
+   che si limita a leggere la pagina pubblica della playlist, nessuna
+   chiave Spotify coinvolta; se non è disponibile, si può incollare
+   l'elenco a mano (CSV di exportify.net o una riga "Titolo - Artista").
+   2) scelta: playlist normale (streaming, come le altre) oppure playlist
+   offline (scaricata per l'ascolto senza connessione).
+   3) per ogni brano si cerca il miglior risultato su YouTube (ytSearch) e,
+   solo se offline, lo si scarica con performDownload.
+   ========================================================= */
+function parseCsvLine(line) {
+  const result = [];
+  let cur = '', inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inQuotes) {
+      if (c === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else inQuotes = false; }
+      else cur += c;
+    } else if (c === '"') inQuotes = true;
+    else if (c === ',') { result.push(cur); cur = ''; }
+    else cur += c;
+  }
+  result.push(cur);
+  return result;
+}
+function parsePastedTracklist(text) {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return [];
+  const header = parseCsvLine(lines[0]).map((h) => h.trim().toLowerCase());
+  const titleIdx = header.findIndex((h) => h === 'track name' || h === 'name' || h === 'title');
+  const artistIdx = header.findIndex((h) => h.startsWith('artist'));
+  if (titleIdx >= 0 && artistIdx >= 0) {
+    return lines.slice(1).map((line) => {
+      const cols = parseCsvLine(line);
+      return { title: (cols[titleIdx] || '').trim(), artist: (cols[artistIdx] || '').split(',')[0].trim() };
+    }).filter((t) => t.title);
+  }
+  return lines.map((line) => {
+    const parts = line.split(/\s[-–]\s/);
+    if (parts.length >= 2) return { title: parts[0].trim(), artist: parts.slice(1).join(' - ').trim() };
+    return { title: line, artist: '' };
+  });
+}
+function importStatusLabel(status, mode) {
+  return {
+    pending: 'In attesa', searching: 'Ricerca su YouTube…', downloading: 'Download…',
+    done: mode === 'offline' ? 'Scaricato' : 'Trovato', nomatch: 'Nessuna corrispondenza', error: 'Errore',
+  }[status] || status;
+}
+// Reads a public Spotify playlist's tracklist through the Worker's own
+// /spotify-playlist endpoint (a plain page-scrape, no Spotify API keys —
+// see spotifi-stream-proxy in the Worker project). Throws if the link is
+// invalid or the endpoint isn't deployed/reachable, so callers can fall
+// back to manual paste.
+async function fetchSpotifyPlaylistTracks(rawUrl) {
+  const m = rawUrl.match(/playlist[/:]([a-zA-Z0-9]+)/);
+  if (!m) throw new Error('Link playlist non valido');
+  const res = await fetch(`${STREAM_PROXY_BASE}/spotify-playlist?id=${m[1]}`);
+  if (!res.ok) throw new Error('endpoint non disponibile (' + res.status + ')');
+  const data = await res.json();
+  if (!data || !Array.isArray(data.tracks) || !data.tracks.length) throw new Error('risposta non valida');
+  return { name: data.name || 'Playlist Spotify', tracks: data.tracks };
+}
+function openImportPlaylistModal() {
+  const root = $('#modalRoot');
+  root.innerHTML = `
+    <div class="modal-overlay" id="importPlModalOverlay">
+      <div class="modal pl-detail-modal">
+        <div class="modal-head"><span class="modal-title">Importa playlist Spotify</span>
+          <button type="button" class="icon-btn" id="importPlCloseBtn"><span class="ic">${ICONS.close}</span></button>
+        </div>
+        <div class="modal-body" id="importPlBody"></div>
+      </div>
+    </div>`;
+  setIcon($('#importPlCloseBtn'), ICONS.close);
+  const close = () => { root.innerHTML = ''; };
+  $('#importPlModalOverlay').addEventListener('click', (e) => { if (e.target.id === 'importPlModalOverlay') close(); });
+  $('#importPlCloseBtn').addEventListener('click', close);
+  enableModalSwipeDismiss(close);
+  const body = $('#importPlBody');
+
+  /* ---- step 1: link (con fallback a incolla manuale) ---- */
+  function showLinkStep(errorMsg) {
+    body.innerHTML = `
+      <div class="modal-hint">Incolla il link della playlist Spotify (in Spotify: Condividi → Copia link playlist). Leggo l'elenco dei brani, poi per ognuno cerco l'audio corrispondente su YouTube.</div>
+      ${errorMsg ? `<div class="modal-hint import-error-hint">${escapeHtml(errorMsg)}</div>` : ''}
+      <input type="text" class="modal-field" id="importPlUrl" placeholder="https://open.spotify.com/playlist/…" />
+      <input type="text" class="modal-field" id="importPlName" placeholder="Nome playlist (opzionale)" />
+      <button type="button" class="modal-btn" id="importPlFetchBtn">Continua</button>
+      <button type="button" class="modal-link-btn" id="importPlManualToggle">Incolla i brani manualmente, invece</button>
+      <div class="hidden" id="importPlManualBox">
+        <div class="modal-hint">Utile se il link non si carica, o se preferisci l'export CSV di un servizio come exportify.net. In alternativa una riga per brano, formato <strong>Titolo - Artista</strong>.</div>
+        <textarea class="modal-field" id="importPlText" rows="7" placeholder="Titolo - Artista"></textarea>
+        <button type="button" class="modal-btn" id="importPlManualContinueBtn">Continua con questo elenco</button>
+      </div>`;
+    $('#importPlManualToggle').addEventListener('click', () => $('#importPlManualBox').classList.toggle('hidden'));
+    $('#importPlFetchBtn').addEventListener('click', async () => {
+      const url = $('#importPlUrl').value.trim();
+      const nameOverride = $('#importPlName').value.trim();
+      if (!url) { showToast('Incolla un link playlist'); return; }
+      const btn = $('#importPlFetchBtn');
+      btn.textContent = 'Carico i brani…'; btn.disabled = true;
+      try {
+        const result = await fetchSpotifyPlaylistTracks(url);
+        showModeStep(nameOverride || result.name, result.tracks);
+      } catch (e) {
+        showLinkStep('Non sono riuscito a leggere il link (' + e.message + '). Puoi incollare i brani manualmente qui sotto.');
+        $('#importPlManualBox').classList.remove('hidden');
+        $('#importPlUrl').value = url;
+        if (nameOverride) $('#importPlName').value = nameOverride;
+      }
+    });
+    $('#importPlManualContinueBtn').addEventListener('click', () => {
+      const nameOverride = $('#importPlName').value.trim();
+      const items = parsePastedTracklist($('#importPlText').value);
+      if (!items.length) { showToast('Incolla almeno un brano'); return; }
+      showModeStep(nameOverride || 'Playlist importata', items);
+    });
+  }
+
+  /* ---- step 2: normale (streaming) o offline (scaricata)? ---- */
+  function showModeStep(name, items) {
+    body.innerHTML = `
+      <div class="modal-hint">“${escapeHtml(name)}” · ${items.length} brani trovati. Come vuoi salvarla?</div>
+      <button type="button" class="import-mode-card" id="modeOnlineBtn">
+        <div class="import-mode-title">Playlist normale</div>
+        <div class="import-mode-desc">Streaming al volo come le altre playlist dell'app: niente da scaricare, nessuno spazio occupato.</div>
+      </button>
+      <button type="button" class="import-mode-card" id="modeOfflineBtn">
+        <div class="import-mode-title">Playlist offline</div>
+        <div class="import-mode-desc">Scarica tutti i brani per ascoltarli anche senza connessione, uno dopo l'altro anche in background.</div>
+      </button>`;
+    $('#modeOnlineBtn').addEventListener('click', () => runImport(name, items, 'online'));
+    $('#modeOfflineBtn').addEventListener('click', () => runImport(name, items, 'offline'));
+  }
+
+  /* ---- step 3: ricerca (+ download se offline) con progresso ---- */
+  async function runImport(name, items, mode) {
+    if (!db.apiKey) { showToast('Serve prima una chiave YouTube API nelle impostazioni'); return; }
+    body.innerHTML = `
+      <div class="import-progress-summary" id="importProgressSummary">Preparazione di ${items.length} brani…</div>
+      <div id="importRowsList" class="import-rows-list"></div>
+      <button type="button" class="modal-btn" id="importDoneBtn" style="display:none">Fatto</button>`;
+    const listEl = $('#importRowsList');
+    const summaryEl = $('#importProgressSummary');
+    const results = items.map((it) => ({ ...it, status: 'pending' }));
+    const renderRows = () => {
+      listEl.innerHTML = results.map((r) => `
+        <div class="import-row">
+          <div class="import-row-title">${escapeHtml(r.title)}${r.artist ? ' · ' + escapeHtml(r.artist) : ''}</div>
+          <div class="import-row-status status-${r.status}">${importStatusLabel(r.status, mode)}</div>
+        </div>`).join('');
+    };
+    renderRows();
+
+    const matchedIds = [];
+    let okCount = 0, failCount = 0;
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      summaryEl.textContent = `Brano ${i + 1} di ${results.length}…`;
+      r.status = 'searching'; renderRows();
+      try {
+        const query = [r.title, r.artist].filter(Boolean).join(' ');
+        const found = await ytSearch(query, 1);
+        const track = found && found[0];
+        if (!track) { r.status = 'nomatch'; failCount++; renderRows(); continue; }
+        db.trackCache[track.id] = { id: track.id, title: track.title, artist: track.artist, thumb: track.thumb };
+        if (mode === 'offline' && !isOffline(track.id)) {
+          r.status = 'downloading'; renderRows();
+          await performDownload(track);
+        }
+        r.status = 'done'; matchedIds.push(track.id); okCount++;
+      } catch (e) {
+        r.status = 'error'; failCount++;
+      }
+      renderRows();
+    }
+
+    let newPlaylistId = null;
+    if (matchedIds.length) {
+      const playlist = { id: 'pl_' + Date.now(), name, trackIds: matchedIds, coverDataUrl: null };
+      (mode === 'offline' ? db.offlinePlaylists : db.playlists).push(playlist);
+      newPlaylistId = playlist.id;
+    }
+    saveDB();
+    summaryEl.textContent = mode === 'offline'
+      ? `Completato: ${okCount} scaricati, ${failCount} non trovati/falliti.`
+      : `Completato: ${okCount} trovati, ${failCount} non trovati/falliti.`;
+    if (currentRoute === 'library') renderLibrary();
+    $('#importDoneBtn').style.display = '';
+    $('#importDoneBtn').addEventListener('click', () => {
+      close();
+      if (newPlaylistId) openPlaylistDetail(mode === 'offline' ? 'offlinePlaylist' : 'playlist', newPlaylistId);
+    });
+  }
+
+  showLinkStep();
+}
+
+// Backed by a shared modal component (see openAddToPlaylistModal below)
 // without duplicating the create-playlist UI.
 function openCreatePlaylistModal(onCreated, targetList, titleText) {
   const list = targetList || db.playlists;
@@ -1288,6 +1651,26 @@ function openSettingsModal() {
             <strong>64 kbps</strong>: il brano parte in circa 2-4 secondi, qualità adatta ad ascolto occasionale/di sottofondo (non hi-fi).<br/>
             <strong>128 kbps</strong>: qualità nettamente migliore, ma l'avvio richiede più tempo (circa 6-7 secondi) perché va scaricato più audio prima di poter partire.
           </div>
+
+          <div class="settings-section-title settings-section-title-spaced">Riproduzione istantanea</div>
+          <div class="modal-hint">Resta sullo streaming diretto da YouTube invece di riscaricare il brano in background per una qualità migliore: avvio ancora più rapido e meno dati usati, utile se vuoi solo ascoltare al volo senza scaricare nulla.</div>
+          <label class="settings-toggle-row">
+            <span>Streaming diretto da YouTube</span>
+            <input type="checkbox" id="instantStreamingToggle" ${db.instantStreaming ? 'checked' : ''} />
+          </label>
+
+          <div class="settings-section-title settings-section-title-spaced">Cartella di salvataggio</div>
+          <div class="modal-hint" id="saveDirHint">${hasDirPicker
+            ? 'Scegli una cartella sul dispositivo: ogni brano scaricato per l\'ascolto offline verrà salvato lì (oltre che nell\'app). Resta comunque disponibile nell\'app anche senza scegliere nulla.'
+            : 'Su questo browser (tipicamente Safari/iOS) non è possibile scegliere una cartella in automatico: è un limite di Apple, non dell\'app. I brani restano comunque disponibili offline dentro Spotifi; per portarli fuori come file usa il pulsante "Esporta" sul singolo brano o su una playlist, che apre il normale foglio di salvataggio di Safari (puoi scegliere lì "Su iPhone" o iCloud Drive).'}</div>
+          ${hasDirPicker ? `
+          <div class="settings-savedir-row">
+            <span class="ic"></span>
+            <span id="saveDirName">${'Nessuna cartella scelta'}</span>
+          </div>
+          <button type="button" class="modal-btn" id="pickSaveDirBtn">Scegli cartella</button>
+          <button type="button" class="modal-btn modal-btn-ghost" id="clearSaveDirBtn">Rimuovi cartella</button>
+          ` : ''}
         </div>
       </div>
     </div>`;
@@ -1296,6 +1679,31 @@ function openSettingsModal() {
   $('#settingsModalOverlay').addEventListener('click', (e) => { if (e.target.id === 'settingsModalOverlay') close(); });
   $('#settingsCloseBtn').addEventListener('click', close);
   enableModalSwipeDismiss(close);
+  $('#instantStreamingToggle').addEventListener('change', (e) => {
+    db.instantStreaming = e.target.checked;
+    saveDB();
+  });
+  if (hasDirPicker) {
+    setIcon($('.settings-savedir-row .ic', root), ICONS.folder);
+    loadSaveDirHandle().then((handle) => {
+      const nameEl = $('#saveDirName');
+      if (nameEl) nameEl.textContent = handle ? `Cartella scelta: ${handle.name}` : 'Nessuna cartella scelta';
+    });
+    $('#pickSaveDirBtn').addEventListener('click', async () => {
+      try {
+        const handle = await pickSaveDir();
+        showToast('Cartella impostata: ' + handle.name);
+        const nameEl = $('#saveDirName');
+        if (nameEl) nameEl.textContent = `Cartella scelta: ${handle.name}`;
+      } catch (e) { /* utente ha annullato la scelta, o permesso negato */ }
+    });
+    $('#clearSaveDirBtn').addEventListener('click', async () => {
+      await clearSaveDir();
+      showToast('Cartella rimossa');
+      const nameEl = $('#saveDirName');
+      if (nameEl) nameEl.textContent = 'Nessuna cartella scelta';
+    });
+  }
   $('#saveApiKeyBtn').addEventListener('click', () => {
     db.apiKey = $('#apiKeyInput').value.trim();
     saveDB();
@@ -1888,7 +2296,10 @@ async function startPlaybackFor(track, isRetry) {
   audioEl.src = streamUrl;
   try { await Promise.race([audioEl.play(), delay(10000)]); } catch (e) { /* 'pause'/'error' listeners reflect whatever actually happened */ }
   setBuffering(false);
-  upgradeToSeekableBlob(streamUrl, myToken, track.id);
+  // "Riproduzione istantanea": resta sullo stream diretto da YouTube invece
+  // di riscaricarlo come blob (meno dati, niente pausa di ri-buffer, ma lo
+  // scrubbing di precisione può essere leggermente meno affidabile).
+  if (!db.instantStreaming) upgradeToSeekableBlob(streamUrl, myToken, track.id);
   // NOT scheduled here — see the 'timeupdate' listener in setupAudioEngine,
   // which fires this once the track is actually nearing its end instead.
 }
